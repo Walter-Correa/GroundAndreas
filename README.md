@@ -54,7 +54,7 @@ It replaces legacy solutions like MapAndreas and heavy 3D physics engines like C
 6. **Precision Underground Detection Engine**
    - Accurately checks whether points, players, or vehicles are underground or inside subterranean spaces.
    - Player checks automatically calculate the foot contact level ($Z_{\text{feet}} = Z_{\text{player}} - 0.90\text{m}$).
-   - Vehicle checks automatically look up the exact model bounding box height from a compiled table of all 212 GTA SA vehicle models ($Z_{\text{wheels}} = Z_{\text{pivot}} - \frac{\text{size\_z}}{2}$).
+   - Vehicle checks automatically look up the exact model bounding box height from a compiled table of all 212 GTA SA vehicle models ($Z_{\text{wheels}} = Z_{\text{pivot}} - \frac{\text{height}}{2}$).
    - Direct float distance returns: `GetPlayerGroundDistance` and `GetVehicleGroundDistance`.
 
 7. **Advanced Water Detection Subsystem**
@@ -162,7 +162,7 @@ native Float:GetVehicleGroundDistance(vehicleid);
 ```
 * **`IsPointUnderGround`**: Returns `true` if the point $(x, y, z)$ is beneath the terrain height.
 * **`IsPlayerUnderGround`**: Resolves player coordinates and checks whether the player's feet ($Z - 0.90\text{m}$) are beneath the terrain.
-* **`IsVehicleUnderGround`**: Resolves vehicle position and vehicle model ID, fetches the exact model height from the internal database, and checks if the wheels/undercarriage ($Z - \frac{\text{size\_z}}{2}$) are beneath the terrain.
+* **`IsVehicleUnderGround`**: Resolves vehicle position and vehicle model ID, fetches the exact model height from the internal database, and checks if the wheels/undercarriage ($Z - \frac{\text{height}}{2}$) are beneath the terrain.
 * **`GetPointGroundDistance`**: Returns the vertical distance between $Z$ and ground level ($Z - Z_{\text{ground}}$). Positive means above ground; negative means underground.
 * **`GetPlayerGroundDistance`**: Returns the vertical distance between the player's feet and the ground.
 * **`GetVehicleGroundDistance`**: Returns the vertical distance between the vehicle wheels and the ground.
@@ -185,7 +185,7 @@ native GetWaterLevel(Float:x, Float:y, &Float:water_z, weatherid = -1);
 ```
 * **`InWater` vs `UnderWater`**:
   * **`InWater`**: Returns `true` when the entity or point makes contact with the water surface (e.g. player wading/swimming, vehicle wheels touching water).
-  * **`UnderWater`**: Returns `true` only when the entity is completely submerged (e.g. player's head $Z + 0.90\text{m}$ is under the surface; vehicle roof $Z + \frac{\text{size\_z}}{2}$ is below the surface).
+  * **`UnderWater`**: Returns `true` only when the entity is completely submerged (e.g. player's head $Z + 0.90\text{m}$ is under the surface; vehicle roof $Z + \frac{\text{height}}{2}$ is below the surface).
 * **`weatherid`**: Optional weather ID (-1 by default for calm sea). GTA SA wave amplitude is automatically factored in:
   * Weather 4, 7, 8, 12, 14, 15, 16 $\implies +1.0\text{m}$ wave crest.
   * Weather 19 (Sandstorm) $\implies +1.5\text{m}$ wave crest.
