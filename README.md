@@ -227,6 +227,62 @@ native ApplyObjectToGroundAndreas(modelid, Float:x, Float:y, Float:z, Float:rx, 
 
 ---
 
+### Advanced Terrain Analytics & Kinematics
+
+#### 1. Safe Spawn & Anti-Void Rescue
+
+```pawn
+native bool:IsGroundSafeForSpawn(Float:x, Float:y, Float:max_slope = 15.0);
+native bool:GetSafeGroundSpawn(Float:search_x, Float:search_y, &Float:safe_x, &Float:safe_y, &Float:safe_z, Float:max_slope = 15.0, Float:search_radius = 50.0);
+```
+* **`IsGroundSafeForSpawn`**: Validates whether a position is safe for player or vehicle spawning. Ensures the coordinate is within world boundaries, not submerged in water, and has a terrain slope within `max_slope` degrees (defaults to $15.0^\circ$).
+* **`GetSafeGroundSpawn`**: If the target location is steep, submerged, or invalid (e.g. anti-void rescue after falling through the map), executes a high-speed outward concentric search to find the nearest valid, dry, flat spawn position and fills `&safe_x, &safe_y, &safe_z`.
+
+---
+
+#### 2. Aircraft Altimeter & Impact Kinematics
+
+```pawn
+native bool:GetGroundImpactTime(Float:x, Float:y, Float:z, Float:vz, &Float:seconds_to_impact, &Float:impact_z, Float:gravity = 9.8);
+```
+* Solves vertical ballistic kinematics:
+  $$z(t) = z_0 + v_z \cdot t - \frac{1}{2} g t^2 = z_{\text{ground}}$$
+* Computes real-time `seconds_to_impact` and the ground collision altitude `impact_z`.
+* Essential for Ground Proximity Warning Systems (GPWS - "PULL UP! TERRAIN!"), air-drop supply parachutes, and bomb/rocket trajectories.
+
+---
+
+#### 3. Radar Shadow & Terrain Masking
+
+```pawn
+native bool:IsPointInRadarShadow(Float:radar_x, Float:radar_y, Float:radar_z, Float:target_x, Float:target_y, Float:target_z);
+```
+* Performs raycast line-of-sight analysis between a radar/SAM installation and a target aircraft/vehicle.
+* Returns `true` if terrain (hills, ridges, mountain peaks) occludes the line of sight, allowing stealth terrain-masking (flying low in valleys to break missile lock or radar tracking).
+
+---
+
+#### 4. Topographic Area Elevation Statistics
+
+```pawn
+native bool:GetAreaElevationStats(Float:minx, Float:miny, Float:maxx, Float:maxy, &Float:min_z, &Float:max_z, &Float:avg_z, &Float:max_slope_deg);
+```
+* Computes analytical terrain statistics across a rectangular zone: minimum altitude, maximum peak, average elevation, and maximum slope inclination.
+* Ideal for dynamic drop-zone evaluation, procedural outpost placement, battle royale ring safety analysis, and terrain grading.
+
+---
+
+#### 5. In-Memory Patch Persistence / Disk Baking
+
+```pawn
+native bool:SaveGroundAndreasPatches(const filename[]);
+native bool:LoadGroundAndreasPatches(const filename[]);
+```
+* Serializes all runtime modifications made by `GroundAndreasRemoveBuilding` and `ApplyObjectToGroundAndreas` to a compact binary `.dat` file.
+* Allows pre-baking all server map changes into disk and instantly reloading them on startup ($<1\text{ms}$) without re-running perimeter regression or object rotation rasterization every time.
+
+---
+
 ## Example & Helper Stocks
 
 Practical helper stocks (`GetGroundHeight`, `HasLineOfSight`, `IsPositionUnderground`) and unit benchmark tests can be found directly in [Example.pwn](Example.pwn).

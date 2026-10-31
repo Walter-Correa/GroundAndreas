@@ -148,6 +148,37 @@ public OnFilterScriptInit()
     GetGroundZPos(247.0, 1460.0, mappedGroundHeight, true, false);
     printf("[8. Dynamic Terrain] Height at mapped slab: %.2fm (Updated into heightmap!)\n", mappedGroundHeight);
 
+    // 9. Safe Spawn & Anti-Void Rescue
+    new bool:safe_spawn = IsGroundSafeForSpawn(2495.0, -1670.0, 15.0); // Grove Street
+    new Float:safe_x, Float:safe_y, Float:safe_z;
+    new bool:found_spawn = GetSafeGroundSpawn(0.0, 0.0, safe_x, safe_y, safe_z, 15.0, 100.0);
+    printf("[9. Safe Spawn] Grove Street Safe=%s | Void Search (0,0) -> Safe Pos=(%.2f, %.2f, %.2f) Found=%s\n",
+        safe_spawn ? ("YES") : ("NO"), safe_x, safe_y, safe_z, found_spawn ? ("YES") : ("NO"));
+
+    // 10. Aircraft Altimeter & Impact Kinematics
+    new Float:impact_time, Float:impact_ground_z;
+    // Aircraft at Z=300m, descending at -25 m/s
+    new bool:has_impact = GetGroundImpactTime(2495.0, -1670.0, 300.0, -25.0, impact_time, impact_ground_z, 9.8);
+    printf("[10. Kinematics] Descent from Z=300m at -25m/s: SecondsToImpact=%.2fs | ImpactZ=%.2fm (Valid=%s)\n",
+        impact_time, impact_ground_z, has_impact ? ("YES") : ("NO"));
+
+    // 11. Radar Shadow & Terrain Masking
+    // Radar station at Mount Chiliad summit, target in low valley
+    new bool:in_shadow = IsPointInRadarShadow(-2300.0, -1630.0, 600.0, -1500.0, -2200.0, 15.0);
+    printf("[11. Radar Shadow] Target hidden behind mountain: InShadow=%s\n", in_shadow ? ("YES") : ("NO"));
+
+    // 12. Topographic Area Elevation Statistics
+    new Float:stat_min_z, Float:stat_max_z, Float:stat_avg_z, Float:stat_max_slope;
+    new bool:has_stats = GetAreaElevationStats(2400.0, -1700.0, 2600.0, -1500.0, stat_min_z, stat_max_z, stat_avg_z, stat_max_slope);
+    printf("[12. Area Stats] Grove Street Area (200x200m): MinZ=%.1fm | MaxZ=%.1fm | AvgZ=%.1fm | MaxSlope=%.1f deg (Valid=%s)\n",
+        stat_min_z, stat_max_z, stat_avg_z, stat_max_slope, has_stats ? ("YES") : ("NO"));
+
+    // 13. In-Memory Patch Persistence / Disk Baking
+    new bool:saved_patches = SaveGroundAndreasPatches("scriptfiles/groundandreas_patches.dat");
+    new bool:loaded_patches = LoadGroundAndreasPatches("scriptfiles/groundandreas_patches.dat");
+    printf("[13. Patch Persistence] Saved=%s | Loaded=%s\n",
+        saved_patches ? ("YES") : ("NO"), loaded_patches ? ("YES") : ("NO"));
+
     print("========================================================");
     print("  GroundAndreas tests completed successfully!");
     print("========================================================\n");

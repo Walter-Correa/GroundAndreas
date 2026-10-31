@@ -1,5 +1,6 @@
 #include "heightmap.h"
 #include "object_data.h"
+#include "water.h"
 #include <fstream>
 #include <algorithm>
 #include <cmath>
@@ -143,6 +144,7 @@ void HeightMap::Unload()
         m_isMmap = false;
         m_loadedPath.clear();
         m_removedBuildings.clear();
+        m_modifiedCells.clear();
     }
 }
 
@@ -646,6 +648,7 @@ bool HeightMap::RemoveBuilding(int modelId, float x, float y, float z, float rad
                 {
                     uint16_t encodedZ = static_cast<uint16_t>(std::clamp(newZ * 100.0f, 0.0f, 65535.0f));
                     m_data[cellIndex] = encodedZ;
+                    m_modifiedCells[cellIndex] = encodedZ;
                 }
             }
         }
@@ -815,8 +818,253 @@ bool HeightMap::ApplyObject(int modelId, float x, float y, float z, float rx, fl
                 {
                     uint16_t encodedZ = static_cast<uint16_t>(std::clamp(surfZ * 100.0f, 0.0f, 65535.0f));
                     m_data[cellIndex] = encodedZ;
+                    m_modifiedCells[cellIndex] = encodedZ;
                 }
             }
+        }
+    }
+
+    return true;
+}
+
+bool HeightMap::IsSafeForSpawn(float x, float y, float maxSlope) const
+{
+    if (!m_isLoaded || m_data == nullptr) return false;
+    if (x < MAP_MIN_X || x > MAP_MAX_X || y < MAP_MIN_Y || y > MAP_MAX_Y) return false;
+
+    float z = 0.0f;
+    if (!GetZ(x, y, z, true, false)) return false;
+
+    // Reject water (ocean, lakes, rivers, reservoirs)
+    if (WaterSystem::IsPointInWater(x, y, z + 0.1f)) return false;
+
+    // Check terrain slope
+    float nx = 0.0f, ny = 0.0f, nz = 0.0f, slopeDeg = 0.0f;
+    if (!GetNormal(x, y, nx, ny, nz, slopeDeg)) return false;
+
+    if (slopeDeg > maxSlope) return false;
+
+    return true;
+}
+
+bool HeightMap::GetSafeSpawn(float searchX, float searchY, float& safeX, float& safeY, float& safeZ,
+                             float maxSlope, float searchRadius) const
+{
+    if (!m_isLoaded || m_data == nullptr) return false;
+
+    if (IsSafeForSpawn(searchX, searchY, maxSlope))
+    {
+        safeX = searchX;
+        safeY = searchY;
+        GetZ(safeX, safeY, safeZ, true, false);
+        return true;
+    }
+
+    searchRadius = (std::max)(5.0f, (std::min)(searchRadius, 300.0f));
+
+    // Concentric spiral search outward
+    for (float r = 5.0f; r <= searchRadius; r += 5.0f)
+    {
+        const int steps = (std::max)(8, static_cast<int>(r * 1.5f));
+        for (int i = 0; i < steps; ++i)
+        {
+            float angle = i * (2.0f * PI_CONST / static_cast<float>(steps));
+            float tx = searchX + r * std::cos(angle);
+            float ty = searchY + r * std::sin(angle);
+
+            if (IsSafeForSpawn(tx, ty, maxSlope))
+            {
+                safeX = tx;
+                safeY = ty;
+                GetZ(safeX, safeY, safeZ, true, false);
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool HeightMap::GetImpactTime(float x, float y, float z, float vz, float& secondsToImpact, float& impactZ, float gravity) const
+{
+    if (!m_isLoaded || m_data == nullptr) return false;
+
+    float groundZ = 0.0f;
+    if (!GetZ(x, y, groundZ, true, false)) return false;
+
+    impactZ = groundZ;
+
+    if (z <= groundZ)
+    {
+        secondsToImpact = 0.0f;
+        return true;
+    }
+
+    const float heightAboveGround = z - groundZ;
+
+    // Linear motion if gravity is negligible
+    if (std::abs(gravity) < 0.001f)
+    {
+        if (vz < -0.01f)
+        {
+            secondsToImpact = -heightAboveGround / vz;
+            return true;
+        }
+        secondsToImpact = 99999.0f;
+        return false;
+    }
+
+    // Ballistic vertical kinematics under gravity: z(t) = z0 + vz*t - 0.5*g*t^2 = groundZ
+    const float discriminant = vz * vz + 2.0f * gravity * heightAboveGround;
+    if (discriminant < 0.0f)
+    {
+        secondsToImpact = 99999.0f;
+        return false;
+    }
+
+    const float sqrtDisc = std::sqrt(discriminant);
+    const float t = (vz + sqrtDisc) / gravity;
+
+    if (t < 0.0f)
+    {
+        secondsToImpact = 0.0f;
+        return true;
+    }
+
+    secondsToImpact = t;
+    return true;
+}
+
+bool HeightMap::IsPointInRadarShadow(float radarX, float radarY, float radarZ, float targetX, float targetY, float targetZ) const
+{
+    if (!m_isLoaded || m_data == nullptr) return false;
+
+    float hitX = 0.0f, hitY = 0.0f, hitZ = 0.0f;
+    return RaycastLine(radarX, radarY, radarZ, targetX, targetY, targetZ, hitX, hitY, hitZ);
+}
+
+bool HeightMap::GetAreaElevationStats(float minX, float minY, float maxX, float maxY,
+                                     float& minZ, float& maxZ, float& avgZ, float& maxSlopeDeg) const
+{
+    if (!m_isLoaded || m_data == nullptr) return false;
+
+    if (minX > maxX) std::swap(minX, maxX);
+    if (minY > maxY) std::swap(minY, maxY);
+
+    minX = (std::max)(MAP_MIN_X, minX);
+    maxX = (std::min)(MAP_MAX_X, maxX);
+    minY = (std::max)(MAP_MIN_Y, minY);
+    maxY = (std::min)(MAP_MAX_Y, maxY);
+
+    int minGx = 0, maxGx = 0, minGy = 0, maxGy = 0;
+    if (!WorldToGrid(minX, minY, minGx, minGy) || !WorldToGrid(maxX, maxY, maxGx, maxGy))
+    {
+        return false;
+    }
+
+    int spanX = maxGx - minGx + 1;
+    int spanY = maxGy - minGy + 1;
+    if (spanX <= 0 || spanY <= 0) return false;
+
+    // Adaptive step to bound queries to at most ~2500 samples
+    int stepX = (std::max)(1, spanX / 50);
+    int stepY = (std::max)(1, spanY / 50);
+
+    float curMinZ = 99999.0f;
+    float curMaxZ = -99999.0f;
+    float sumZ = 0.0f;
+    float curMaxSlope = 0.0f;
+    int sampleCount = 0;
+
+    for (int gy = minGy; gy <= maxGy; gy += stepY)
+    {
+        for (int gx = minGx; gx <= maxGx; gx += stepX)
+        {
+            float z = ReadHeightRaw(gx, gy);
+            curMinZ = (std::min)(curMinZ, z);
+            curMaxZ = (std::max)(curMaxZ, z);
+            sumZ += z;
+
+            // Approximate slope at cell
+            int leftGx = (std::max)(0, gx - 1);
+            int rightGx = (std::min)(MAP_GRID_WIDTH - 1, gx + 1);
+            int downGy = (std::max)(0, gy - 1);
+            int upGy = (std::min)(MAP_GRID_HEIGHT - 1, gy + 1);
+
+            float dz_dx = (ReadHeightRaw(rightGx, gy) - ReadHeightRaw(leftGx, gy)) * 0.5f;
+            float dz_dy = (ReadHeightRaw(gx, upGy) - ReadHeightRaw(gx, downGy)) * 0.5f;
+            float slope = std::atan(std::sqrt(dz_dx * dz_dx + dz_dy * dz_dy)) * RAD_TO_DEG;
+            curMaxSlope = (std::max)(curMaxSlope, slope);
+
+            sampleCount++;
+        }
+    }
+
+    if (sampleCount == 0) return false;
+
+    minZ = curMinZ;
+    maxZ = curMaxZ;
+    avgZ = sumZ / static_cast<float>(sampleCount);
+    maxSlopeDeg = curMaxSlope;
+    return true;
+}
+
+constexpr uint32_t GPATCH_MAGIC = 0x43545047; // 'G','P','T','C'
+constexpr uint32_t GPATCH_VERSION = 1;
+
+bool HeightMap::SavePatches(const std::string& filename) const
+{
+    if (!m_isLoaded || m_data == nullptr) return false;
+
+    std::ofstream out(filename, std::ios::binary);
+    if (!out.is_open()) return false;
+
+    out.write(reinterpret_cast<const char*>(&GPATCH_MAGIC), sizeof(GPATCH_MAGIC));
+    out.write(reinterpret_cast<const char*>(&GPATCH_VERSION), sizeof(GPATCH_VERSION));
+
+    const uint32_t count = static_cast<uint32_t>(m_modifiedCells.size());
+    out.write(reinterpret_cast<const char*>(&count), sizeof(count));
+
+    for (const auto& kv : m_modifiedCells)
+    {
+        uint32_t cellIndex = static_cast<uint32_t>(kv.first);
+        uint16_t encodedZ = kv.second;
+        out.write(reinterpret_cast<const char*>(&cellIndex), sizeof(cellIndex));
+        out.write(reinterpret_cast<const char*>(&encodedZ), sizeof(encodedZ));
+    }
+
+    return true;
+}
+
+bool HeightMap::LoadPatches(const std::string& filename)
+{
+    if (!m_isLoaded || m_data == nullptr) return false;
+
+    std::ifstream in(filename, std::ios::binary);
+    if (!in.is_open()) return false;
+
+    uint32_t magic = 0;
+    in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    if (magic != GPATCH_MAGIC) return false;
+
+    uint32_t version = 0;
+    in.read(reinterpret_cast<char*>(&version), sizeof(version));
+    if (version != GPATCH_VERSION) return false;
+
+    uint32_t count = 0;
+    in.read(reinterpret_cast<char*>(&count), sizeof(count));
+
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        uint32_t cellIndex = 0;
+        uint16_t encodedZ = 0;
+        in.read(reinterpret_cast<char*>(&cellIndex), sizeof(cellIndex));
+        in.read(reinterpret_cast<char*>(&encodedZ), sizeof(encodedZ));
+
+        if (cellIndex < MAP_TOTAL_CELLS)
+        {
+            m_data[cellIndex] = encodedZ;
+            m_modifiedCells[cellIndex] = encodedZ;
         }
     }
 

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <unordered_map>
 
 constexpr float MAP_MIN_X = -3000.0f;
 constexpr float MAP_MAX_X = 3000.0f;
@@ -58,6 +59,25 @@ public:
     bool ApplyObject(int modelId, float x, float y, float z, float rx, float ry, float rz,
                      bool forceReplace = false, float customSizeX = 0.0f, float customSizeY = 0.0f, float customSizeZ = 0.0f);
 
+    // Safe spawn & anti-void rescue
+    bool IsSafeForSpawn(float x, float y, float maxSlope = 15.0f) const;
+    bool GetSafeSpawn(float searchX, float searchY, float& safeX, float& safeY, float& safeZ,
+                      float maxSlope = 15.0f, float searchRadius = 50.0f) const;
+
+    // Aircraft altimeter & impact prediction
+    bool GetImpactTime(float x, float y, float z, float vz, float& secondsToImpact, float& impactZ, float gravity = 9.8f) const;
+
+    // Radar shadow & terrain masking
+    bool IsPointInRadarShadow(float radarX, float radarY, float radarZ, float targetX, float targetY, float targetZ) const;
+
+    // Topographic area elevation stats
+    bool GetAreaElevationStats(float minX, float minY, float maxX, float maxY,
+                               float& minZ, float& maxZ, float& avgZ, float& maxSlopeDeg) const;
+
+    // Patch persistence
+    bool SavePatches(const std::string& filename) const;
+    bool LoadPatches(const std::string& filename);
+
     const std::string& GetLoadedPath() const { return m_loadedPath; }
 
 private:
@@ -75,6 +95,7 @@ private:
     std::string m_loadedPath;
 
     std::unordered_set<uint64_t> m_removedBuildings;
+    std::unordered_map<size_t, uint16_t> m_modifiedCells;
 
     // Windows file mapping handles
 #if defined(_WIN32) || defined(WIN32)

@@ -36,6 +36,15 @@ namespace Natives
     // Dynamic terrain patching & building removal
     cell AMX_NATIVE_CALL GroundAndreasRemoveBuilding(AMX* amx, cell* params);
     cell AMX_NATIVE_CALL ApplyObjectToGroundAndreas(AMX* amx, cell* params);
+
+    // Advanced terrain analytics & mechanics
+    cell AMX_NATIVE_CALL IsGroundSafeForSpawn(AMX* amx, cell* params);
+    cell AMX_NATIVE_CALL GetSafeGroundSpawn(AMX* amx, cell* params);
+    cell AMX_NATIVE_CALL GetGroundImpactTime(AMX* amx, cell* params);
+    cell AMX_NATIVE_CALL IsPointInRadarShadow(AMX* amx, cell* params);
+    cell AMX_NATIVE_CALL GetAreaElevationStats(AMX* amx, cell* params);
+    cell AMX_NATIVE_CALL SaveGroundAndreasPatches(AMX* amx, cell* params);
+    cell AMX_NATIVE_CALL LoadGroundAndreasPatches(AMX* amx, cell* params);
 }
 
 extern AMX_NATIVE_INFO PluginNatives[];

@@ -635,6 +635,187 @@ namespace Natives
 
         return HeightMap::Instance().ApplyObject(modelId, x, y, z, rx, ry, rz, forceReplace, customSx, customSy, customSz) ? 1 : 0;
     }
+
+    // native bool:IsGroundSafeForSpawn(Float:x, Float:y, Float:max_slope = 15.0);
+    cell AMX_NATIVE_CALL IsGroundSafeForSpawn(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(2 * sizeof(cell)))
+        {
+            return 0;
+        }
+
+        const float x = CellToFloat(params[1]);
+        const float y = CellToFloat(params[2]);
+        const float maxSlope = (params[0] >= static_cast<cell>(3 * sizeof(cell))) ? CellToFloat(params[3]) : 15.0f;
+
+        return HeightMap::Instance().IsSafeForSpawn(x, y, maxSlope) ? 1 : 0;
+    }
+
+    // native bool:GetSafeGroundSpawn(Float:search_x, Float:search_y, &Float:safe_x, &Float:safe_y, &Float:safe_z, Float:max_slope = 15.0, Float:search_radius = 50.0);
+    cell AMX_NATIVE_CALL GetSafeGroundSpawn(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(5 * sizeof(cell)))
+        {
+            return 0;
+        }
+
+        const float searchX = CellToFloat(params[1]);
+        const float searchY = CellToFloat(params[2]);
+        const float maxSlope = (params[0] >= static_cast<cell>(6 * sizeof(cell))) ? CellToFloat(params[6]) : 15.0f;
+        const float searchRadius = (params[0] >= static_cast<cell>(7 * sizeof(cell))) ? CellToFloat(params[7]) : 50.0f;
+
+        float safeX = 0.0f, safeY = 0.0f, safeZ = 0.0f;
+        bool result = HeightMap::Instance().GetSafeSpawn(searchX, searchY, safeX, safeY, safeZ, maxSlope, searchRadius);
+
+        cell* addrX = nullptr;
+        if (amx_GetAddr(amx, params[3], &addrX) == AMX_ERR_NONE && addrX != nullptr)
+        {
+            *addrX = FloatToCell(safeX);
+        }
+
+        cell* addrY = nullptr;
+        if (amx_GetAddr(amx, params[4], &addrY) == AMX_ERR_NONE && addrY != nullptr)
+        {
+            *addrY = FloatToCell(safeY);
+        }
+
+        cell* addrZ = nullptr;
+        if (amx_GetAddr(amx, params[5], &addrZ) == AMX_ERR_NONE && addrZ != nullptr)
+        {
+            *addrZ = FloatToCell(safeZ);
+        }
+
+        return result ? 1 : 0;
+    }
+
+    // native bool:GetGroundImpactTime(Float:x, Float:y, Float:z, Float:vz, &Float:seconds_to_impact, &Float:impact_z, Float:gravity = 9.8);
+    cell AMX_NATIVE_CALL GetGroundImpactTime(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(6 * sizeof(cell)))
+        {
+            return 0;
+        }
+
+        const float x = CellToFloat(params[1]);
+        const float y = CellToFloat(params[2]);
+        const float z = CellToFloat(params[3]);
+        const float vz = CellToFloat(params[4]);
+        const float gravity = (params[0] >= static_cast<cell>(7 * sizeof(cell))) ? CellToFloat(params[7]) : 9.8f;
+
+        float secondsToImpact = 0.0f, impactZ = 0.0f;
+        bool result = HeightMap::Instance().GetImpactTime(x, y, z, vz, secondsToImpact, impactZ, gravity);
+
+        cell* addrSec = nullptr;
+        if (amx_GetAddr(amx, params[5], &addrSec) == AMX_ERR_NONE && addrSec != nullptr)
+        {
+            *addrSec = FloatToCell(secondsToImpact);
+        }
+
+        cell* addrImpZ = nullptr;
+        if (amx_GetAddr(amx, params[6], &addrImpZ) == AMX_ERR_NONE && addrImpZ != nullptr)
+        {
+            *addrImpZ = FloatToCell(impactZ);
+        }
+
+        return result ? 1 : 0;
+    }
+
+    // native bool:IsPointInRadarShadow(Float:radar_x, Float:radar_y, Float:radar_z, Float:target_x, Float:target_y, Float:target_z);
+    cell AMX_NATIVE_CALL IsPointInRadarShadow(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(6 * sizeof(cell)))
+        {
+            return 0;
+        }
+
+        const float rx = CellToFloat(params[1]);
+        const float ry = CellToFloat(params[2]);
+        const float rz = CellToFloat(params[3]);
+        const float tx = CellToFloat(params[4]);
+        const float ty = CellToFloat(params[5]);
+        const float tz = CellToFloat(params[6]);
+
+        return HeightMap::Instance().IsPointInRadarShadow(rx, ry, rz, tx, ty, tz) ? 1 : 0;
+    }
+
+    // native bool:GetAreaElevationStats(Float:minx, Float:miny, Float:maxx, Float:maxy, &Float:min_z, &Float:max_z, &Float:avg_z, &Float:max_slope_deg);
+    cell AMX_NATIVE_CALL GetAreaElevationStats(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(8 * sizeof(cell)))
+        {
+            return 0;
+        }
+
+        const float minX = CellToFloat(params[1]);
+        const float minY = CellToFloat(params[2]);
+        const float maxX = CellToFloat(params[3]);
+        const float maxY = CellToFloat(params[4]);
+
+        float minZ = 0.0f, maxZ = 0.0f, avgZ = 0.0f, maxSlopeDeg = 0.0f;
+        bool result = HeightMap::Instance().GetAreaElevationStats(minX, minY, maxX, maxY, minZ, maxZ, avgZ, maxSlopeDeg);
+
+        cell* addrMinZ = nullptr;
+        if (amx_GetAddr(amx, params[5], &addrMinZ) == AMX_ERR_NONE && addrMinZ != nullptr)
+        {
+            *addrMinZ = FloatToCell(minZ);
+        }
+
+        cell* addrMaxZ = nullptr;
+        if (amx_GetAddr(amx, params[6], &addrMaxZ) == AMX_ERR_NONE && addrMaxZ != nullptr)
+        {
+            *addrMaxZ = FloatToCell(maxZ);
+        }
+
+        cell* addrAvgZ = nullptr;
+        if (amx_GetAddr(amx, params[7], &addrAvgZ) == AMX_ERR_NONE && addrAvgZ != nullptr)
+        {
+            *addrAvgZ = FloatToCell(avgZ);
+        }
+
+        cell* addrSlope = nullptr;
+        if (amx_GetAddr(amx, params[8], &addrSlope) == AMX_ERR_NONE && addrSlope != nullptr)
+        {
+            *addrSlope = FloatToCell(maxSlopeDeg);
+        }
+
+        return result ? 1 : 0;
+    }
+
+    // native bool:SaveGroundAndreasPatches(const filename[]);
+    cell AMX_NATIVE_CALL SaveGroundAndreasPatches(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(sizeof(cell)))
+        {
+            return 0;
+        }
+
+        char* pathStr = nullptr;
+        amx_StrParam(amx, params[1], pathStr);
+        if (pathStr == nullptr || std::strlen(pathStr) == 0)
+        {
+            return 0;
+        }
+
+        return HeightMap::Instance().SavePatches(pathStr) ? 1 : 0;
+    }
+
+    // native bool:LoadGroundAndreasPatches(const filename[]);
+    cell AMX_NATIVE_CALL LoadGroundAndreasPatches(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(sizeof(cell)))
+        {
+            return 0;
+        }
+
+        char* pathStr = nullptr;
+        amx_StrParam(amx, params[1], pathStr);
+        if (pathStr == nullptr || std::strlen(pathStr) == 0)
+        {
+            return 0;
+        }
+
+        return HeightMap::Instance().LoadPatches(pathStr) ? 1 : 0;
+    }
 }
 
 AMX_NATIVE_INFO PluginNatives[] =
@@ -666,5 +847,12 @@ AMX_NATIVE_INFO PluginNatives[] =
     { "GetWaterLevel",              Natives::GetWaterLevel },
     { "GroundAndreasRemoveBuilding",      Natives::GroundAndreasRemoveBuilding },
     { "ApplyObjectToGroundAndreas",       Natives::ApplyObjectToGroundAndreas },
+    { "IsGroundSafeForSpawn",       Natives::IsGroundSafeForSpawn },
+    { "GetSafeGroundSpawn",         Natives::GetSafeGroundSpawn },
+    { "GetGroundImpactTime",        Natives::GetGroundImpactTime },
+    { "IsPointInRadarShadow",       Natives::IsPointInRadarShadow },
+    { "GetAreaElevationStats",      Natives::GetAreaElevationStats },
+    { "SaveGroundAndreasPatches",         Natives::SaveGroundAndreasPatches },
+    { "LoadGroundAndreasPatches",         Natives::LoadGroundAndreasPatches },
     { nullptr, nullptr }
 };

@@ -33,6 +33,14 @@ native GetWaterLevel(Float:x, Float:y, &Float:water_z, weatherid = -1);
 native GroundAndreasRemoveBuilding(modelid, Float:fX, Float:fY, Float:fZ, Float:fRadius);
 native ApplyObjectToGroundAndreas(modelid, Float:x, Float:y, Float:z, Float:rx, Float:ry, Float:rz, bool:force_replace = false, Float:custom_sizex = 0.0, Float:custom_sizey = 0.0, Float:custom_sizez = 0.0);
 
+native bool:IsGroundSafeForSpawn(Float:x, Float:y, Float:max_slope = 15.0);
+native bool:GetSafeGroundSpawn(Float:search_x, Float:search_y, &Float:safe_x, &Float:safe_y, &Float:safe_z, Float:max_slope = 15.0, Float:search_radius = 50.0);
+native bool:GetGroundImpactTime(Float:x, Float:y, Float:z, Float:vz, &Float:seconds_to_impact, &Float:impact_z, Float:gravity = 9.8);
+native bool:IsPointInRadarShadow(Float:radar_x, Float:radar_y, Float:radar_z, Float:target_x, Float:target_y, Float:target_z);
+native bool:GetAreaElevationStats(Float:minx, Float:miny, Float:maxx, Float:maxy, &Float:min_z, &Float:max_z, &Float:avg_z, &Float:max_slope_deg);
+native bool:SaveGroundAndreasPatches(const filename[]);
+native bool:LoadGroundAndreasPatches(const filename[]);
+
 #if !defined GROUNDANDREAS_NO_REMOVE_BUILDING
     stock GroundAndreas_RemoveBuildingForPlayer(playerid, modelid, Float:fX, Float:fY, Float:fZ, Float:fRadius)
     {
