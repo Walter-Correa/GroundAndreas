@@ -1,0 +1,4 @@
+*.hmap binary
+*.dat binary
+*.dll binary
+*.so binary

@@ -1,0 +1,33 @@
+# Bytecode and build artifacts
+*.amx
+*.lst
+*.asm
+*.o
+*.obj
+*.exp
+*.lib
+*.dll
+*.so
+*.dylib
+*.pdb
+
+# Dependencies & Lockfiles
+dependencies/
+pawn.lock
+
+# Build directories
+build/
+build-*/
+package/
+package-*/
+dist/
+x64/
+Win32/
+.vs/
+.vscode/
+
+# Server runtime files
+server.cfg
+server_log.txt
+crashinfo.txt
+samp.ban

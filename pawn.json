@@ -1,0 +1,39 @@
+{
+	"user": "Walter-Correa",
+	"repo": "GroundAndreas",
+	"entry": "Example.pwn",
+	"output": "Example.amx",
+	"dependencies": [
+		"sampctl/samp-stdlib"
+	],
+	"resources": [
+		{
+			"name": "GroundAndreas-Windows.zip",
+			"platform": "windows",
+			"archive": true,
+			"includes": [
+				"GroundAndreas.inc"
+			],
+			"plugins": [
+				"GroundAndreas.dll"
+			],
+			"files": {
+				"SAfull.hmap": "scriptfiles/SAfull.hmap"
+			}
+		},
+		{
+			"name": "GroundAndreas-Linux.zip",
+			"platform": "linux",
+			"archive": true,
+			"includes": [
+				"GroundAndreas.inc"
+			],
+			"plugins": [
+				"GroundAndreas.so"
+			],
+			"files": {
+				"SAfull.hmap": "scriptfiles/SAfull.hmap"
+			}
+		}
+	]
+}
