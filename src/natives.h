@@ -32,6 +32,10 @@ namespace Natives
     cell AMX_NATIVE_CALL IsVehicleInWater(AMX* amx, cell* params);
     cell AMX_NATIVE_CALL IsVehicleUnderWater(AMX* amx, cell* params);
     cell AMX_NATIVE_CALL GetWaterLevel(AMX* amx, cell* params);
+
+    // Dynamic terrain patching & building removal
+    cell AMX_NATIVE_CALL GroundAndreasRemoveBuilding(AMX* amx, cell* params);
+    cell AMX_NATIVE_CALL ApplyObjectToGroundAndreas(AMX* amx, cell* params);
 }
 
 extern AMX_NATIVE_INFO PluginNatives[];

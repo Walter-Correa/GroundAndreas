@@ -62,7 +62,12 @@ It replaces legacy solutions like MapAndreas and heavy 3D physics engines like C
    - Covers global ocean bathymetry with dynamic wave amplitude tables mapped to San Andreas weather IDs.
    - Built-in volume boundaries and floor elevations for 16 major inland water bodies (Sherman Dam Reservoir, Glen Park Lake, Palomino Lagoon, airport canals, casino water spectacles, mansion swimming pools, and interior pools) to completely prevent false positives in tunnels or cellars beneath water.
 
-8. **Dual-Target: Native open.mp Component & Traditional SA-MP Plugin**
+8. **Dynamic Terrain Modification & Object Surface Stamping**
+   - Reconstructs natural ground slopes when GTA buildings are removed (`GroundAndreasRemoveBuilding`), using least-squares perimeter plane fitting and lower-quartile terrain anchoring to avoid sampling neighboring structures.
+   - Automatically hooks SA-MP's `RemoveBuildingForPlayer` with deduplication caching (run once per structure, zero runtime overhead).
+   - Stamps dynamic mapped objects (`ApplyObjectToGroundAndreas`) onto the heightmap with full 3D Euler rotations (Pitch, Roll, Yaw) and exact inclined plane equations (helipads, roads, ramps, bridges).
+
+9. **Dual-Target: Native open.mp Component & Traditional SA-MP Plugin**
    - Compiles both as a modern open.mp component (`components/GroundAndreas.dll` / `.so`) and a traditional SA-MP 0.3.7 plugin (`plugins/GroundAndreas.dll` / `.so`).
 
 ---
@@ -201,6 +206,24 @@ native GetGroundZPosBatch(const Float:points_x[], const Float:points_y[], Float:
 ```
 * Processes coordinate arrays directly inside C++ without AMX context switching overhead.
 * Processes **10,000 coordinates in ~15 milliseconds**.
+
+---
+
+### Dynamic Terrain Modification & Object Stamping
+
+```pawn
+native GroundAndreasRemoveBuilding(modelid, Float:fX, Float:fY, Float:fZ, Float:fRadius);
+native ApplyObjectToGroundAndreas(modelid, Float:x, Float:y, Float:z, Float:rx, Float:ry, Float:rz, bool:force_replace = false, Float:custom_sizex = 0.0, Float:custom_sizey = 0.0, Float:custom_sizez = 0.0);
+```
+* **`GroundAndreasRemoveBuilding`**:
+  * Automatically calculates the model's physical footprint and reconstructs the underlying terrain slope using perimeter least-squares gradient fitting.
+  * Employs lower-quartile terrain filtering so dense clusters of removed industrial structures do not sample neighboring rooftops.
+  * **Automatic `RemoveBuildingForPlayer` Hook**: By default, `GroundAndreas.inc` hooks `RemoveBuildingForPlayer` transparently. Any building removed in `OnPlayerConnect` is automatically updated in the heightmap on first appearance with zero runtime overhead.
+  * Define `#define GROUNDANDREAS_NO_REMOVE_BUILDING` before `#include <GroundAndreas>` to disable the automatic hook.
+* **`ApplyObjectToGroundAndreas`**:
+  * Projects the top walkable surface of a mapped object into the heightmap grid in memory.
+  * Handles 3D Euler rotations ($RX, RY, RZ$) and computes exact inclined plane equations, seamlessly supporting tilted ramps, elevated roads, bridges, and helipads.
+  * Uses a precompiled dimension catalog of popular SA-MP 0.3c, 0.3d, and 0.3.7 mapping objects (concrete slabs, roads, bridges, ramps, runways). Pass `custom_sizex, custom_sizey, custom_sizez` for custom or uncatalogued models.
 
 ---
 

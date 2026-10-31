@@ -3,6 +3,7 @@
 #include "common.h"
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 constexpr float MAP_MIN_X = -3000.0f;
 constexpr float MAP_MAX_X = 3000.0f;
@@ -52,6 +53,11 @@ public:
     // Batch query
     int GetZBatch(const float* xArr, const float* yArr, float* zOut, int totalPoints, bool interpolate) const;
 
+    // Dynamic terrain modification and patch reconstruction
+    bool RemoveBuilding(int modelId, float x, float y, float z, float radius);
+    bool ApplyObject(int modelId, float x, float y, float z, float rx, float ry, float rz,
+                     bool forceReplace = false, float customSizeX = 0.0f, float customSizeY = 0.0f, float customSizeZ = 0.0f);
+
     const std::string& GetLoadedPath() const { return m_loadedPath; }
 
 private:
@@ -65,8 +71,10 @@ private:
 
     bool m_isLoaded{ false };
     bool m_isMmap{ false };
-    const uint16_t* m_data{ nullptr };
+    uint16_t* m_data{ nullptr };
     std::string m_loadedPath;
+
+    std::unordered_set<uint64_t> m_removedBuildings;
 
     // Windows file mapping handles
 #if defined(_WIN32) || defined(WIN32)

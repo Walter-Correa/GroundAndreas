@@ -135,6 +135,19 @@ public OnFilterScriptInit()
     printf("[7. Benchmark] Processed %d elevation queries in %d ms (~%.2f ns/query)\n", 
         processed, elapsed, (float(elapsed) * 1000000.0) / float(TOTAL_BENCHMARK));
 
+    // 8. Dynamic Terrain Modification & Building Removal
+    printf("[8. Dynamic Terrain] Testing GroundAndreasRemoveBuilding and ApplyObjectToGroundAndreas...");
+    
+    // Simulate removing an industrial tower in Bone County
+    GroundAndreasRemoveBuilding(3682, 247.9297, 1461.8594, 33.4141, 100.0);
+
+    // Stamp a new 60x60m helipad/parking slab (Model 19379) at Z=15.0m
+    ApplyObjectToGroundAndreas(19379, 247.0, 1460.0, 15.0, 0.0, 0.0, 0.0);
+
+    new Float:mappedGroundHeight;
+    GetGroundZPos(247.0, 1460.0, mappedGroundHeight, true, false);
+    printf("[8. Dynamic Terrain] Height at mapped slab: %.2fm (Updated into heightmap!)\n", mappedGroundHeight);
+
     print("========================================================");
     print("  GroundAndreas tests completed successfully!");
     print("========================================================\n");

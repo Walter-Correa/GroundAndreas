@@ -29,3 +29,21 @@ native bool:IsPlayerUnderWater(playerid, weatherid = -1);
 native bool:IsVehicleInWater(vehicleid, weatherid = -1);
 native bool:IsVehicleUnderWater(vehicleid, weatherid = -1);
 native GetWaterLevel(Float:x, Float:y, &Float:water_z, weatherid = -1);
+
+native GroundAndreasRemoveBuilding(modelid, Float:fX, Float:fY, Float:fZ, Float:fRadius);
+native ApplyObjectToGroundAndreas(modelid, Float:x, Float:y, Float:z, Float:rx, Float:ry, Float:rz, bool:force_replace = false, Float:custom_sizex = 0.0, Float:custom_sizey = 0.0, Float:custom_sizez = 0.0);
+
+#if !defined GROUNDANDREAS_NO_REMOVE_BUILDING
+    stock GroundAndreas_RemoveBuildingForPlayer(playerid, modelid, Float:fX, Float:fY, Float:fZ, Float:fRadius)
+    {
+        GroundAndreasRemoveBuilding(modelid, fX, fY, fZ, fRadius);
+        return RemoveBuildingForPlayer(playerid, modelid, fX, fY, fZ, fRadius);
+    }
+
+    #if defined _ALS_RemoveBuildingForPlayer
+        #undef RemoveBuildingForPlayer
+    #else
+        #define _ALS_RemoveBuildingForPlayer
+    #endif
+    #define RemoveBuildingForPlayer GroundAndreas_RemoveBuildingForPlayer
+#endif

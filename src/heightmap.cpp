@@ -1,4 +1,5 @@
 #include "heightmap.h"
+#include "object_data.h"
 #include <fstream>
 #include <algorithm>
 #include <cmath>
@@ -36,10 +37,10 @@ bool HeightMap::Load(const std::string& filepath)
         LARGE_INTEGER size;
         if (GetFileSizeEx(m_hFile, &size) && static_cast<size_t>(size.QuadPart) >= MAP_FILE_SIZE)
         {
-            m_hMapping = CreateFileMappingA(m_hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+            m_hMapping = CreateFileMappingA(m_hFile, NULL, PAGE_WRITECOPY, 0, 0, NULL);
             if (m_hMapping != NULL)
             {
-                m_data = static_cast<const uint16_t*>(MapViewOfFile(m_hMapping, FILE_MAP_READ, 0, 0, 0));
+                m_data = static_cast<uint16_t*>(MapViewOfFile(m_hMapping, FILE_MAP_COPY, 0, 0, 0));
                 if (m_data != nullptr)
                 {
                     m_isMmap = true;
@@ -61,10 +62,10 @@ bool HeightMap::Load(const std::string& filepath)
         struct stat sb;
         if (fstat(m_fd, &sb) == 0 && static_cast<size_t>(sb.st_size) >= MAP_FILE_SIZE)
         {
-            void* mapped = mmap(NULL, MAP_FILE_SIZE, PROT_READ, MAP_SHARED, m_fd, 0);
+            void* mapped = mmap(NULL, MAP_FILE_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE, m_fd, 0);
             if (mapped != MAP_FAILED)
             {
-                m_data = static_cast<const uint16_t*>(mapped);
+                m_data = static_cast<uint16_t*>(mapped);
                 m_isMmap = true;
                 m_isLoaded = true;
                 m_loadedPath = filepath;
@@ -141,6 +142,7 @@ void HeightMap::Unload()
         m_isLoaded = false;
         m_isMmap = false;
         m_loadedPath.clear();
+        m_removedBuildings.clear();
     }
 }
 
@@ -503,4 +505,320 @@ int HeightMap::GetZBatch(const float* xArr, const float* yArr, float* zOut, int 
     }
 
     return processed;
+}
+
+bool HeightMap::RemoveBuilding(int modelId, float x, float y, float z, float radius)
+{
+    if (!m_isLoaded || m_data == nullptr)
+    {
+        return false;
+    }
+
+    // Safety guard: Global map-wide wipe pattern (e.g. RemoveBuildingForPlayer(playerid, model, 0.0, 0.0, 0.0, 6000.0))
+    // Global wipes are search queries for props/trees/lamps across the state, not a single massive structure.
+    if (std::abs(x) < 1.0f && std::abs(y) < 1.0f && radius > 500.0f)
+    {
+        return true;
+    }
+
+    // Deduplication check: hash of modelId and quantized coordinates (run once per unique building location)
+    const int qx = static_cast<int>(std::round(x * 2.0f));
+    const int qy = static_cast<int>(std::round(y * 2.0f));
+    const int qz = static_cast<int>(std::round(z * 2.0f));
+
+    const uint64_t buildingKey = (static_cast<uint64_t>(modelId & 0xFFFF) << 48) ^
+                                 (static_cast<uint64_t>(static_cast<uint32_t>(qx)) << 32) ^
+                                 (static_cast<uint64_t>(static_cast<uint32_t>(qy)) << 16) ^
+                                 (static_cast<uint64_t>(static_cast<uint32_t>(qz)));
+
+    if (!m_removedBuildings.insert(buildingKey).second)
+    {
+        return true; // Already processed in this server session
+    }
+
+    // Determine the actual physical footprint of the model (decoupled from SA-MP search radius)
+    float physicalRadius = GetModelPhysicalRadius(modelId);
+    float effectiveRadius = std::clamp(physicalRadius, 4.0f, 60.0f);
+
+    // If the mapper provided a specific local radius between 1.0m and 45.0m, consider it as an upper bound
+    if (radius >= 1.0f && radius < effectiveRadius)
+    {
+        effectiveRadius = radius;
+    }
+
+    // Perimeter sampling to fit ground slope (Z = C + A*(x - x0) + B*(y - y0))
+    constexpr int NUM_SAMPLES = 16;
+    const float sampleRadius = effectiveRadius + 2.0f;
+
+    struct SamplePoint
+    {
+        float u;
+        float v;
+        float z;
+    };
+    std::vector<SamplePoint> samples;
+    samples.reserve(NUM_SAMPLES);
+
+    for (int i = 0; i < NUM_SAMPLES; ++i)
+    {
+        float angle = i * (2.0f * PI_CONST / static_cast<float>(NUM_SAMPLES));
+        float u = sampleRadius * std::cos(angle);
+        float v = sampleRadius * std::sin(angle);
+        float sx = x + u;
+        float sy = y + v;
+        float sz = 0.0f;
+
+        if (GetZ(sx, sy, sz, true, false))
+        {
+            samples.push_back({ u, v, sz });
+        }
+    }
+
+    float planeA = 0.0f;
+    float planeB = 0.0f;
+    float planeC = z;
+
+    if (!samples.empty())
+    {
+        // Outlier rejection: In dense industrial sites, adjacent structures might still be elevated.
+        // We sort sample heights and retain the lower 60% of samples (the true natural ground).
+        std::vector<SamplePoint> sortedSamples = samples;
+        std::sort(sortedSamples.begin(), sortedSamples.end(), [](const SamplePoint& a, const SamplePoint& b) {
+            return a.z < b.z;
+        });
+
+        size_t keepCount = std::max<size_t>(3, (sortedSamples.size() * 6) / 10);
+        float sumU2 = 0.0f, sumV2 = 0.0f, sumZ = 0.0f, sumUZ = 0.0f, sumVZ = 0.0f;
+
+        for (size_t i = 0; i < keepCount; ++i)
+        {
+            const auto& s = sortedSamples[i];
+            sumU2 += s.u * s.u;
+            sumV2 += s.v * s.v;
+            sumZ += s.z;
+            sumUZ += s.u * s.z;
+            sumVZ += s.v * s.z;
+        }
+
+        const float n = static_cast<float>(keepCount);
+        planeC = sumZ / n;
+
+        if (sumU2 > 0.001f)
+        {
+            planeA = sumUZ / sumU2;
+        }
+        if (sumV2 > 0.001f)
+        {
+            planeB = sumVZ / sumV2;
+        }
+    }
+
+    // Bounding grid range for rasterization
+    int minGx = 0, maxGx = 0, minGy = 0, maxGy = 0;
+    WorldToGrid(x - effectiveRadius, y - effectiveRadius, minGx, minGy);
+    WorldToGrid(x + effectiveRadius, y + effectiveRadius, maxGx, maxGy);
+
+    minGx = std::clamp(minGx, 0, MAP_GRID_WIDTH - 1);
+    maxGx = std::clamp(maxGx, 0, MAP_GRID_WIDTH - 1);
+    minGy = std::clamp(minGy, 0, MAP_GRID_HEIGHT - 1);
+    maxGy = std::clamp(maxGy, 0, MAP_GRID_HEIGHT - 1);
+
+    const float radiusSq = effectiveRadius * effectiveRadius;
+
+    for (int gy = minGy; gy <= maxGy; ++gy)
+    {
+        for (int gx = minGx; gx <= maxGx; ++gx)
+        {
+            float wx = static_cast<float>(gx - 3000);
+            float wy = static_cast<float>(gy - 3000);
+
+            float du = wx - x;
+            float dv = wy - y;
+
+            if ((du * du + dv * dv) <= radiusSq)
+            {
+                float newZ = planeC + planeA * du + planeB * dv;
+                size_t cellIndex = static_cast<size_t>(gy) * MAP_GRID_WIDTH + static_cast<size_t>(gx);
+                float currentZ = static_cast<float>(m_data[cellIndex]) * 0.01f;
+
+                // Golden Rule: Removal can only LOWER the elevation (carve/flatten), never raise to a roof
+                if (newZ < currentZ)
+                {
+                    uint16_t encodedZ = static_cast<uint16_t>(std::clamp(newZ * 100.0f, 0.0f, 65535.0f));
+                    m_data[cellIndex] = encodedZ;
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+bool HeightMap::ApplyObject(int modelId, float x, float y, float z, float rx, float ry, float rz,
+                            bool forceReplace, float customSizeX, float customSizeY, float customSizeZ)
+{
+    if (!m_isLoaded || m_data == nullptr)
+    {
+        return false;
+    }
+
+    float sx = customSizeX, sy = customSizeY, sz = customSizeZ;
+    if (sx <= 0.001f || sy <= 0.001f)
+    {
+        GetCommonObjectModelDimensions(modelId, sx, sy, sz);
+    }
+
+    if (sz <= 0.001f)
+    {
+        sz = 0.5f;
+    }
+
+    // Top face corners in local object coordinates
+    const float hx = sx * 0.5f;
+    const float hy = sy * 0.5f;
+    const float hz = sz * 0.5f;
+
+    struct Vec3 { float x, y, z; };
+    Vec3 localCorners[4] = {
+        { -hx, -hy, hz },
+        {  hx, -hy, hz },
+        {  hx,  hy, hz },
+        { -hx,  hy, hz }
+    };
+
+    // Euler angles in radians: GTA SA convention RX (Pitch), RY (Roll), RZ (Yaw)
+    const float radX = rx * DEG_TO_RAD;
+    const float radY = ry * DEG_TO_RAD;
+    const float radZ = rz * DEG_TO_RAD;
+
+    const float cx = std::cos(radX), sx_ = std::sin(radX);
+    const float cy = std::cos(radY), sy_ = std::sin(radY);
+    const float cz = std::cos(radZ), sz_ = std::sin(radZ);
+
+    // Rotation transform R = Rz * Ry * Rx
+    auto rotatePoint = [&](const Vec3& v) -> Vec3 {
+        // Rx
+        float y1 = v.y * cx - v.z * sx_;
+        float z1 = v.y * sx_ + v.z * cx;
+        // Ry
+        float x2 = v.x * cy + z1 * sy_;
+        float z2 = -v.x * sy_ + z1 * cy;
+        // Rz
+        float x3 = x2 * cz - y1 * sz_;
+        float y3 = x2 * sz_ + y1 * cz;
+        return { x3 + x, y3 + y, z2 + z };
+    };
+
+    Vec3 worldCorners[4];
+    float minX = 99999.0f, maxX = -99999.0f, minY = 99999.0f, maxY = -99999.0f;
+    for (int i = 0; i < 4; ++i)
+    {
+        worldCorners[i] = rotatePoint(localCorners[i]);
+        minX = (std::min)(minX, worldCorners[i].x);
+        maxX = (std::max)(maxX, worldCorners[i].x);
+        minY = (std::min)(minY, worldCorners[i].y);
+        maxY = (std::max)(maxY, worldCorners[i].y);
+    }
+
+    // Calculate face normal: (P1 - P0) x (P3 - P0)
+    Vec3 e1 = { worldCorners[1].x - worldCorners[0].x, worldCorners[1].y - worldCorners[0].y, worldCorners[1].z - worldCorners[0].z };
+    Vec3 e2 = { worldCorners[3].x - worldCorners[0].x, worldCorners[3].y - worldCorners[0].y, worldCorners[3].z - worldCorners[0].z };
+
+    Vec3 normal = {
+        e1.y * e2.z - e1.z * e2.y,
+        e1.z * e2.x - e1.x * e2.z,
+        e1.x * e2.y - e1.y * e2.x
+    };
+
+    float normalLen = std::sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+    if (normalLen < 0.0001f)
+    {
+        return false;
+    }
+    normal.x /= normalLen;
+    normal.y /= normalLen;
+    normal.z /= normalLen;
+
+    // Ensure normal points upward towards +Z
+    if (normal.z < 0.0f)
+    {
+        normal.x = -normal.x;
+        normal.y = -normal.y;
+        normal.z = -normal.z;
+    }
+
+    if (std::abs(normal.z) < 0.01f)
+    {
+        return false; // Vertical surface (wall)
+    }
+
+    // Plane constant D = -(N . P0)
+    float planeD = -(normal.x * worldCorners[0].x + normal.y * worldCorners[0].y + normal.z * worldCorners[0].z);
+
+    // Rasterization grid bounds
+    int minGx = 0, maxGx = 0, minGy = 0, maxGy = 0;
+    WorldToGrid(minX, minY, minGx, minGy);
+    WorldToGrid(maxX, maxY, maxGx, maxGy);
+
+    minGx = std::clamp(minGx, 0, MAP_GRID_WIDTH - 1);
+    maxGx = std::clamp(maxGx, 0, MAP_GRID_WIDTH - 1);
+    minGy = std::clamp(minGy, 0, MAP_GRID_HEIGHT - 1);
+    maxGy = std::clamp(maxGy, 0, MAP_GRID_HEIGHT - 1);
+
+    // Determine polygon 2D winding order
+    bool invertedWinding = false;
+    {
+        float dx = worldCorners[1].x - worldCorners[0].x;
+        float dy = worldCorners[1].y - worldCorners[0].y;
+        float testCross = dx * (worldCorners[2].y - worldCorners[0].y) - dy * (worldCorners[2].x - worldCorners[0].x);
+        if (testCross < 0.0f)
+        {
+            invertedWinding = true;
+        }
+    }
+
+    auto isInsideQuad = [&](float px, float py) -> bool {
+        for (int i = 0; i < 4; ++i)
+        {
+            int next = (i + 1) % 4;
+            float dx = worldCorners[next].x - worldCorners[i].x;
+            float dy = worldCorners[next].y - worldCorners[i].y;
+            float cross = dx * (py - worldCorners[i].y) - dy * (px - worldCorners[i].x);
+            if (invertedWinding)
+            {
+                if (cross > 0.001f) return false;
+            }
+            else
+            {
+                if (cross < -0.001f) return false;
+            }
+        }
+        return true;
+    };
+
+    for (int gy = minGy; gy <= maxGy; ++gy)
+    {
+        for (int gx = minGx; gx <= maxGx; ++gx)
+        {
+            float wx = static_cast<float>(gx - 3000);
+            float wy = static_cast<float>(gy - 3000);
+
+            if (isInsideQuad(wx, wy))
+            {
+                // Surface elevation from plane equation: Z = (-D - nx * wx - ny * wy) / nz
+                float surfZ = (-planeD - normal.x * wx - normal.y * wy) / normal.z;
+
+                size_t cellIndex = static_cast<size_t>(gy) * MAP_GRID_WIDTH + static_cast<size_t>(gx);
+                float currZ = static_cast<float>(m_data[cellIndex]) * 0.01f;
+
+                if (forceReplace || surfZ > currZ)
+                {
+                    uint16_t encodedZ = static_cast<uint16_t>(std::clamp(surfZ * 100.0f, 0.0f, 65535.0f));
+                    m_data[cellIndex] = encodedZ;
+                }
+            }
+        }
+    }
+
+    return true;
 }

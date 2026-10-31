@@ -579,6 +579,62 @@ namespace Natives
 
         return hasWater ? 1 : 0;
     }
+
+    // native GroundAndreasRemoveBuilding(modelid, Float:fX, Float:fY, Float:fZ, Float:fRadius);
+    cell AMX_NATIVE_CALL GroundAndreasRemoveBuilding(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(5 * sizeof(cell)))
+        {
+            return 0;
+        }
+
+        const int modelId = params[1];
+        const float x = CellToFloat(params[2]);
+        const float y = CellToFloat(params[3]);
+        const float z = CellToFloat(params[4]);
+        const float radius = CellToFloat(params[5]);
+
+        return HeightMap::Instance().RemoveBuilding(modelId, x, y, z, radius) ? 1 : 0;
+    }
+
+    // native ApplyObjectToGroundAndreas(modelid, Float:x, Float:y, Float:z, Float:rx, Float:ry, Float:rz, bool:force_replace = false, Float:custom_sizex = 0.0, Float:custom_sizey = 0.0, Float:custom_sizez = 0.0);
+    cell AMX_NATIVE_CALL ApplyObjectToGroundAndreas(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(7 * sizeof(cell)))
+        {
+            return 0;
+        }
+
+        const int modelId = params[1];
+        const float x = CellToFloat(params[2]);
+        const float y = CellToFloat(params[3]);
+        const float z = CellToFloat(params[4]);
+        const float rx = CellToFloat(params[5]);
+        const float ry = CellToFloat(params[6]);
+        const float rz = CellToFloat(params[7]);
+
+        bool forceReplace = false;
+        if (params[0] >= static_cast<cell>(8 * sizeof(cell)))
+        {
+            forceReplace = (params[8] != 0);
+        }
+
+        float customSx = 0.0f, customSy = 0.0f, customSz = 0.0f;
+        if (params[0] >= static_cast<cell>(9 * sizeof(cell)))
+        {
+            customSx = CellToFloat(params[9]);
+        }
+        if (params[0] >= static_cast<cell>(10 * sizeof(cell)))
+        {
+            customSy = CellToFloat(params[10]);
+        }
+        if (params[0] >= static_cast<cell>(11 * sizeof(cell)))
+        {
+            customSz = CellToFloat(params[11]);
+        }
+
+        return HeightMap::Instance().ApplyObject(modelId, x, y, z, rx, ry, rz, forceReplace, customSx, customSy, customSz) ? 1 : 0;
+    }
 }
 
 AMX_NATIVE_INFO PluginNatives[] =
@@ -608,5 +664,7 @@ AMX_NATIVE_INFO PluginNatives[] =
     { "IsVehicleInWater",           Natives::IsVehicleInWater },
     { "IsVehicleUnderWater",        Natives::IsVehicleUnderWater },
     { "GetWaterLevel",              Natives::GetWaterLevel },
+    { "GroundAndreasRemoveBuilding",      Natives::GroundAndreasRemoveBuilding },
+    { "ApplyObjectToGroundAndreas",       Natives::ApplyObjectToGroundAndreas },
     { nullptr, nullptr }
 };
