@@ -1,5 +1,8 @@
 #include "natives.h"
 #include "heightmap.h"
+#include "water.h"
+#include "vehicle_data.h"
+#include "amx_helper.h"
 #include <vector>
 #include <cstring>
 
@@ -60,7 +63,7 @@ namespace Natives
         cell* zAddr = nullptr;
         if (amx_GetAddr(amx, params[3], &zAddr) == AMX_ERR_NONE && zAddr != nullptr)
         {
-            *zAddr = amx_ftoc(z);
+            *zAddr = FloatToCell(z);
         }
 
         return success ? 1 : 0;
@@ -89,7 +92,7 @@ namespace Natives
             cell* hxAddr = nullptr;
             if (amx_GetAddr(amx, params[7], &hxAddr) == AMX_ERR_NONE && hxAddr != nullptr)
             {
-                *hxAddr = amx_ftoc(hitX);
+                *hxAddr = FloatToCell(hitX);
             }
         }
 
@@ -98,7 +101,7 @@ namespace Natives
             cell* hyAddr = nullptr;
             if (amx_GetAddr(amx, params[8], &hyAddr) == AMX_ERR_NONE && hyAddr != nullptr)
             {
-                *hyAddr = amx_ftoc(hitY);
+                *hyAddr = FloatToCell(hitY);
             }
         }
 
@@ -107,7 +110,7 @@ namespace Natives
             cell* hzAddr = nullptr;
             if (amx_GetAddr(amx, params[9], &hzAddr) == AMX_ERR_NONE && hzAddr != nullptr)
             {
-                *hzAddr = amx_ftoc(hitZ);
+                *hzAddr = FloatToCell(hitZ);
             }
         }
 
@@ -131,19 +134,19 @@ namespace Natives
         cell* addr = nullptr;
         if (amx_GetAddr(amx, params[3], &addr) == AMX_ERR_NONE && addr != nullptr)
         {
-            *addr = amx_ftoc(nx);
+            *addr = FloatToCell(nx);
         }
         if (amx_GetAddr(amx, params[4], &addr) == AMX_ERR_NONE && addr != nullptr)
         {
-            *addr = amx_ftoc(ny);
+            *addr = FloatToCell(ny);
         }
         if (amx_GetAddr(amx, params[5], &addr) == AMX_ERR_NONE && addr != nullptr)
         {
-            *addr = amx_ftoc(nz);
+            *addr = FloatToCell(nz);
         }
         if (amx_GetAddr(amx, params[6], &addr) == AMX_ERR_NONE && addr != nullptr)
         {
-            *addr = amx_ftoc(slope);
+            *addr = FloatToCell(slope);
         }
 
         return success ? 1 : 0;
@@ -167,13 +170,13 @@ namespace Natives
         cell* rxAddr = nullptr;
         if (amx_GetAddr(amx, params[4], &rxAddr) == AMX_ERR_NONE && rxAddr != nullptr)
         {
-            *rxAddr = amx_ftoc(rx);
+            *rxAddr = FloatToCell(rx);
         }
 
         cell* ryAddr = nullptr;
         if (amx_GetAddr(amx, params[5], &ryAddr) == AMX_ERR_NONE && ryAddr != nullptr)
         {
-            *ryAddr = amx_ftoc(ry);
+            *ryAddr = FloatToCell(ry);
         }
 
         return success ? 1 : 0;
@@ -198,7 +201,7 @@ namespace Natives
             cell* depthAddr = nullptr;
             if (amx_GetAddr(amx, params[3], &depthAddr) == AMX_ERR_NONE && depthAddr != nullptr)
             {
-                *depthAddr = amx_ftoc(waterDepth);
+                *depthAddr = FloatToCell(waterDepth);
             }
         }
 
@@ -224,7 +227,7 @@ namespace Natives
         cell* clAddr = nullptr;
         if (amx_GetAddr(amx, params[4], &clAddr) == AMX_ERR_NONE && clAddr != nullptr)
         {
-            *clAddr = amx_ftoc(clearance);
+            *clAddr = FloatToCell(clearance);
         }
 
         if (params[0] >= 5 * sizeof(cell))
@@ -280,10 +283,301 @@ namespace Natives
 
         for (int i = 0; i < totalPoints; ++i)
         {
-            zAddr[i] = amx_ftoc(zVec[i]);
+            zAddr[i] = FloatToCell(zVec[i]);
         }
 
         return processed;
+    }
+
+    // native bool:IsPointUnderGround(Float:x, Float:y, Float:z);
+    cell AMX_NATIVE_CALL IsPointUnderGround(AMX* amx, cell* params)
+    {
+        if (params[0] < (3 * static_cast<cell>(sizeof(cell))))
+        {
+            return 0;
+        }
+
+        const float x = amx_ctof(params[1]);
+        const float y = amx_ctof(params[2]);
+        const float z = amx_ctof(params[3]);
+
+        float groundZ = 0.0f;
+        if (!HeightMap::Instance().GetZ(x, y, groundZ, true, false))
+        {
+            return 0;
+        }
+
+        return (z < (groundZ - 0.05f)) ? 1 : 0;
+    }
+
+    // native bool:IsPlayerUnderGround(playerid);
+    cell AMX_NATIVE_CALL IsPlayerUnderGround(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(sizeof(cell)))
+        {
+            return 0;
+        }
+
+        const int playerId = params[1];
+        float px = 0.0f, py = 0.0f, pz = 0.0f;
+        if (!AmxHelper::GetPlayerPos(amx, playerId, px, py, pz))
+        {
+            return 0;
+        }
+
+        float groundZ = 0.0f;
+        if (!HeightMap::Instance().GetZ(px, py, groundZ, true, false))
+        {
+            return 0;
+        }
+
+        const float feetZ = pz - 0.90f;
+        return (feetZ < (groundZ - 0.30f)) ? 1 : 0;
+    }
+
+    // native bool:IsVehicleUnderGround(vehicleid);
+    cell AMX_NATIVE_CALL IsVehicleUnderGround(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(sizeof(cell)))
+        {
+            return 0;
+        }
+
+        const int vehicleId = params[1];
+        float vx = 0.0f, vy = 0.0f, vz = 0.0f;
+        if (!AmxHelper::GetVehiclePos(amx, vehicleId, vx, vy, vz))
+        {
+            return 0;
+        }
+
+        const int modelId = AmxHelper::GetVehicleModel(amx, vehicleId);
+        const float sizeZ = GetVehicleModelSizeZ(modelId);
+
+        float groundZ = 0.0f;
+        if (!HeightMap::Instance().GetZ(vx, vy, groundZ, true, false))
+        {
+            return 0;
+        }
+
+        const float wheelsZ = vz - (sizeZ * 0.5f);
+        return (wheelsZ < (groundZ - 0.40f)) ? 1 : 0;
+    }
+
+    // native Float:GetPointGroundDistance(Float:x, Float:y, Float:z);
+    cell AMX_NATIVE_CALL GetPointGroundDistance(AMX* amx, cell* params)
+    {
+        if (params[0] < (3 * static_cast<cell>(sizeof(cell))))
+        {
+            return FloatToCell(0.0f);
+        }
+
+        const float x = amx_ctof(params[1]);
+        const float y = amx_ctof(params[2]);
+        const float z = amx_ctof(params[3]);
+
+        float groundZ = 0.0f;
+        if (!HeightMap::Instance().GetZ(x, y, groundZ, true, false))
+        {
+            return FloatToCell(0.0f);
+        }
+
+        return FloatToCell(z - groundZ);
+    }
+
+    // native Float:GetPlayerGroundDistance(playerid);
+    cell AMX_NATIVE_CALL GetPlayerGroundDistance(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(sizeof(cell)))
+        {
+            return FloatToCell(0.0f);
+        }
+
+        const int playerId = params[1];
+        float px = 0.0f, py = 0.0f, pz = 0.0f;
+        if (!AmxHelper::GetPlayerPos(amx, playerId, px, py, pz))
+        {
+            return FloatToCell(0.0f);
+        }
+
+        float groundZ = 0.0f;
+        if (!HeightMap::Instance().GetZ(px, py, groundZ, true, false))
+        {
+            return FloatToCell(0.0f);
+        }
+
+        const float feetZ = pz - 0.90f;
+        return FloatToCell(feetZ - groundZ);
+    }
+
+    // native Float:GetVehicleGroundDistance(vehicleid);
+    cell AMX_NATIVE_CALL GetVehicleGroundDistance(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(sizeof(cell)))
+        {
+            return FloatToCell(0.0f);
+        }
+
+        const int vehicleId = params[1];
+        float vx = 0.0f, vy = 0.0f, vz = 0.0f;
+        if (!AmxHelper::GetVehiclePos(amx, vehicleId, vx, vy, vz))
+        {
+            return FloatToCell(0.0f);
+        }
+
+        const int modelId = AmxHelper::GetVehicleModel(amx, vehicleId);
+        const float sizeZ = GetVehicleModelSizeZ(modelId);
+
+        float groundZ = 0.0f;
+        if (!HeightMap::Instance().GetZ(vx, vy, groundZ, true, false))
+        {
+            return FloatToCell(0.0f);
+        }
+
+        const float wheelsZ = vz - (sizeZ * 0.5f);
+        return FloatToCell(wheelsZ - groundZ);
+    }
+
+    // native bool:IsPointInWater(Float:x, Float:y, Float:z, weatherid = -1);
+    cell AMX_NATIVE_CALL IsPointInWater(AMX* amx, cell* params)
+    {
+        if (params[0] < (3 * static_cast<cell>(sizeof(cell))))
+        {
+            return 0;
+        }
+
+        const float x = amx_ctof(params[1]);
+        const float y = amx_ctof(params[2]);
+        const float z = amx_ctof(params[3]);
+        const int weatherid = (params[0] >= 4 * sizeof(cell)) ? params[4] : -1;
+
+        return WaterSystem::IsPointInWater(x, y, z, weatherid) ? 1 : 0;
+    }
+
+    // native bool:IsPointUnderWater(Float:x, Float:y, Float:z, weatherid = -1);
+    cell AMX_NATIVE_CALL IsPointUnderWater(AMX* amx, cell* params)
+    {
+        if (params[0] < (3 * static_cast<cell>(sizeof(cell))))
+        {
+            return 0;
+        }
+
+        const float x = amx_ctof(params[1]);
+        const float y = amx_ctof(params[2]);
+        const float z = amx_ctof(params[3]);
+        const int weatherid = (params[0] >= 4 * sizeof(cell)) ? params[4] : -1;
+
+        return WaterSystem::IsPointUnderWater(x, y, z, weatherid) ? 1 : 0;
+    }
+
+    // native bool:IsPlayerInWater(playerid, weatherid = -1);
+    cell AMX_NATIVE_CALL IsPlayerInWater(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(sizeof(cell)))
+        {
+            return 0;
+        }
+
+        const int playerId = params[1];
+        const int weatherid = (params[0] >= 2 * sizeof(cell)) ? params[2] : -1;
+
+        float px = 0.0f, py = 0.0f, pz = 0.0f;
+        if (!AmxHelper::GetPlayerPos(amx, playerId, px, py, pz))
+        {
+            return 0;
+        }
+
+        return WaterSystem::IsPlayerInWater(px, py, pz, weatherid) ? 1 : 0;
+    }
+
+    // native bool:IsPlayerUnderWater(playerid, weatherid = -1);
+    cell AMX_NATIVE_CALL IsPlayerUnderWater(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(sizeof(cell)))
+        {
+            return 0;
+        }
+
+        const int playerId = params[1];
+        const int weatherid = (params[0] >= 2 * sizeof(cell)) ? params[2] : -1;
+
+        float px = 0.0f, py = 0.0f, pz = 0.0f;
+        if (!AmxHelper::GetPlayerPos(amx, playerId, px, py, pz))
+        {
+            return 0;
+        }
+
+        return WaterSystem::IsPlayerUnderWater(px, py, pz, weatherid) ? 1 : 0;
+    }
+
+    // native bool:IsVehicleInWater(vehicleid, weatherid = -1);
+    cell AMX_NATIVE_CALL IsVehicleInWater(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(sizeof(cell)))
+        {
+            return 0;
+        }
+
+        const int vehicleId = params[1];
+        const int weatherid = (params[0] >= 2 * sizeof(cell)) ? params[2] : -1;
+
+        float vx = 0.0f, vy = 0.0f, vz = 0.0f;
+        if (!AmxHelper::GetVehiclePos(amx, vehicleId, vx, vy, vz))
+        {
+            return 0;
+        }
+
+        const int modelId = AmxHelper::GetVehicleModel(amx, vehicleId);
+        const float sizeZ = GetVehicleModelSizeZ(modelId);
+
+        return WaterSystem::IsVehicleInWater(vx, vy, vz, sizeZ, weatherid) ? 1 : 0;
+    }
+
+    // native bool:IsVehicleUnderWater(vehicleid, weatherid = -1);
+    cell AMX_NATIVE_CALL IsVehicleUnderWater(AMX* amx, cell* params)
+    {
+        if (params[0] < static_cast<cell>(sizeof(cell)))
+        {
+            return 0;
+        }
+
+        const int vehicleId = params[1];
+        const int weatherid = (params[0] >= 2 * sizeof(cell)) ? params[2] : -1;
+
+        float vx = 0.0f, vy = 0.0f, vz = 0.0f;
+        if (!AmxHelper::GetVehiclePos(amx, vehicleId, vx, vy, vz))
+        {
+            return 0;
+        }
+
+        const int modelId = AmxHelper::GetVehicleModel(amx, vehicleId);
+        const float sizeZ = GetVehicleModelSizeZ(modelId);
+
+        return WaterSystem::IsVehicleUnderWater(vx, vy, vz, sizeZ, weatherid) ? 1 : 0;
+    }
+
+    // native GetWaterLevel(Float:x, Float:y, &Float:water_z, weatherid = -1);
+    cell AMX_NATIVE_CALL GetWaterLevel(AMX* amx, cell* params)
+    {
+        if (params[0] < (3 * static_cast<cell>(sizeof(cell))))
+        {
+            return 0;
+        }
+
+        const float x = amx_ctof(params[1]);
+        const float y = amx_ctof(params[2]);
+        const int weatherid = (params[0] >= 4 * sizeof(cell)) ? params[4] : -1;
+
+        float surfaceZ = 0.0f;
+        float bottomZ = 0.0f;
+        const bool hasWater = WaterSystem::GetWaterLevelAt(x, y, surfaceZ, bottomZ, weatherid);
+
+        cell* outAddr = nullptr;
+        if (amx_GetAddr(amx, params[3], &outAddr) == AMX_ERR_NONE && outAddr != nullptr)
+        {
+            *outAddr = FloatToCell(hasWater ? surfaceZ : 0.0f);
+        }
+
+        return hasWater ? 1 : 0;
     }
 }
 
@@ -301,5 +595,18 @@ AMX_NATIVE_INFO PluginNatives[] =
     { "GetGroundClearance",         Natives::GetGroundClearance },
     { "GetGroundZPosBatch",         Natives::GetGroundZPosBatch },
     { "GetGroundZBatch",            Natives::GetGroundZPosBatch },
+    { "IsPointUnderGround",         Natives::IsPointUnderGround },
+    { "IsPlayerUnderGround",        Natives::IsPlayerUnderGround },
+    { "IsVehicleUnderGround",       Natives::IsVehicleUnderGround },
+    { "GetPointGroundDistance",     Natives::GetPointGroundDistance },
+    { "GetPlayerGroundDistance",    Natives::GetPlayerGroundDistance },
+    { "GetVehicleGroundDistance",   Natives::GetVehicleGroundDistance },
+    { "IsPointInWater",             Natives::IsPointInWater },
+    { "IsPointUnderWater",          Natives::IsPointUnderWater },
+    { "IsPlayerInWater",            Natives::IsPlayerInWater },
+    { "IsPlayerUnderWater",         Natives::IsPlayerUnderWater },
+    { "IsVehicleInWater",           Natives::IsVehicleInWater },
+    { "IsVehicleUnderWater",        Natives::IsVehicleUnderWater },
+    { "GetWaterLevel",              Natives::GetWaterLevel },
     { nullptr, nullptr }
 };

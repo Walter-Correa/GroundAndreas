@@ -14,3 +14,18 @@ native GetGroundObjectRotation(Float:x, Float:y, Float:facing_angle, &Float:rx, 
 native bool:IsGroundUnderwater(Float:x, Float:y, &Float:water_depth = 0.0);
 native GetGroundClearance(Float:x, Float:y, Float:z, &Float:clearance, &bool:is_underground = false);
 native GetGroundZPosBatch(const Float:points_x[], const Float:points_y[], Float:out_z[], total_points, bool:interpolate = true);
+
+native bool:IsPointUnderGround(Float:x, Float:y, Float:z);
+native bool:IsPlayerUnderGround(playerid);
+native bool:IsVehicleUnderGround(vehicleid);
+native Float:GetPointGroundDistance(Float:x, Float:y, Float:z);
+native Float:GetPlayerGroundDistance(playerid);
+native Float:GetVehicleGroundDistance(vehicleid);
+
+native bool:IsPointInWater(Float:x, Float:y, Float:z, weatherid = -1);
+native bool:IsPointUnderWater(Float:x, Float:y, Float:z, weatherid = -1);
+native bool:IsPlayerInWater(playerid, weatherid = -1);
+native bool:IsPlayerUnderWater(playerid, weatherid = -1);
+native bool:IsVehicleInWater(vehicleid, weatherid = -1);
+native bool:IsVehicleUnderWater(vehicleid, weatherid = -1);
+native GetWaterLevel(Float:x, Float:y, &Float:water_z, weatherid = -1);

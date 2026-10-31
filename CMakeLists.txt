@@ -71,6 +71,7 @@ endif()
 set(GROUNDANDREAS_COMMON_SOURCES
   src/heightmap.cpp
   src/natives.cpp
+  src/water.cpp
   lib/sdk/amxplugin.cpp
   lib/sdk/amxplugin2.cpp
 )

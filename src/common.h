@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cmath>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <iostream>
@@ -28,3 +29,17 @@ typedef void (*logprintf_t)(const char* format, ...);
 extern logprintf_t logprintf;
 
 extern void* pAMXFunctions;
+
+inline cell FloatToCell(float f)
+{
+    cell c = 0;
+    std::memcpy(&c, &f, sizeof(float));
+    return c;
+}
+
+inline float CellToFloat(cell c)
+{
+    float f = 0.0f;
+    std::memcpy(&f, &c, sizeof(float));
+    return f;
+}
