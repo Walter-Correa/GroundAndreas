@@ -307,6 +307,35 @@ cmake --build build --config Release
 
 ---
 
+## Version history
+
+<details>
+<summary>Show the version history</summary>
+
+### 1.0.0 – 31/10/2026
+- Initial standalone production release of **GroundAndreas**:
+  - **Memory-Mapped Heightfield Engine**: Zero-latency boot ($< 1\text{ms}$) via `MapViewOfFile` / `mmap` with Copy-On-Write (`PAGE_WRITECOPY` / `MAP_PRIVATE`) demand paging, reducing RAM footprint to ~10–20MB.
+  - **Bilinear Elevation Interpolation**: Continuous sub-millimeter terrain queries (`GetGroundZPos`), eliminating legacy 1m discrete staircases.
+  - **2.5D World Line-of-Sight Raycasting**: Ultra-fast line tracing (`IsWorldBlockingLine`) with sub-millimeter binary search refinement running in $< 1\mu\text{s}$.
+  - **Surface Normal & Slope Analysis**: Real-time perpendicular unit vector $\vec{N}$ and terrain inclination in degrees ($0^\circ - 90^\circ$) via `GetGroundNormal`.
+  - **Dynamic Object Alignment**: Automated Pitch ($RX$) and Roll ($RY$) slope orientation (`GetGroundObjectRotation`) for road barriers, tents, and props.
+  - **Precision Underground Detection**: Full suite of subterranean collision checks (`IsPointUnderGround`, `IsPlayerUnderGround`, `IsVehicleUnderGround`, `GetPointGroundDistance`, `GetPlayerGroundDistance`, `GetVehicleGroundDistance`) factoring in ped center-of-mass/foot offsets and a compiled database of all 212 GTA SA vehicle model heights.
+  - **Dual-Layer Comprehensive Water Dynamics**: Physical differentiation between surface contact (`InWater`) and full submersion (`UnderWater`), covering 16 inland water bodies (reservoirs, casino pools, fountains, lakes, interior pools) and global ocean bathymetry with weather surge factors (`weatherid`).
+  - **Dynamic Terrain Modification & Stamping**: Reconstruct carved ground upon building removal (`GroundAndreasRemoveBuilding`) with perimeter least-squares gradient regression and lower-quartile terrain filtering; stamp mapped object walking surfaces (`ApplyObjectToGroundAndreas`) with 3D Euler rotations and precompiled SA-MP 0.3.7 modular object dimensions.
+  - **Automated Removal Hook**: Built-in transparent `RemoveBuildingForPlayer` hook in `GroundAndreas.inc` (can be disabled via `#define GROUNDANDREAS_NO_REMOVE_BUILDING`).
+  - **Topographic Analytics & Kinematics**:
+    - Safe spawn locator & anti-void rescue (`IsGroundSafeForSpawn`, `GetSafeGroundSpawn`).
+    - GPWS terrain collision warning & aircraft altimeter kinematics (`GetGroundImpactTime`).
+    - Radar occlusion & terrain masking (`IsPointInRadarShadow`).
+    - Topographic statistical analysis over rectangular zones (`GetAreaElevationStats`).
+    - In-memory patch serialization & disk baking (`SaveGroundAndreasPatches`, `LoadGroundAndreasPatches`).
+  - **Dual-Target Architecture**: Compiles as both a traditional SA-MP 0.3.7 plugin (`plugins/GroundAndreas.dll` / `.so`) and a native open.mp component (`components/GroundAndreas.dll` / `.so`).
+  - **High-Throughput Batch Processing**: Array query processing directly in C++ (`GetGroundZPosBatch`) achieving 10,000 queries in ~15ms.
+
+</details>
+
+---
+
 ## License
 
 This project is licensed under the **Mozilla Public License Version 2.0 (MPL-2.0)** - see the [LICENSE](LICENSE) file for details.

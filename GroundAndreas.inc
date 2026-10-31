@@ -3,6 +3,11 @@
 #endif
 #define _GroundAndreas_included
 
+#define GROUNDANDREAS_VERSION_MAJOR           1
+#define GROUNDANDREAS_VERSION_MINOR           0
+#define GROUNDANDREAS_VERSION_PATCH           0
+#define GROUNDANDREAS_VERSION_STRING          "1.0.0"
+
 native GroundAndreas_Init(const file_path[] = "scriptfiles/SAfull.hmap");
 native GroundAndreas_Unload();
 native bool:GroundAndreas_IsLoaded();

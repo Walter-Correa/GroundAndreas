@@ -1,6 +1,7 @@
 {
 	"user": "Walter-Correa",
 	"repo": "GroundAndreas",
+	"version": "1.0.0",
 	"entry": "Example.pwn",
 	"output": "Example.amx",
 	"dependencies": [

@@ -1,4 +1,4 @@
-name: Build & Release
+name: Build
 
 on:
   workflow_dispatch:
@@ -7,8 +7,6 @@ on:
       - "*"
       - "*/*"
       - "**"
-    tags:
-      - "v*"
   pull_request:
     branches:
       - "*"
@@ -19,7 +17,7 @@ jobs:
   build-windows-release:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           clean: true
           submodules: recursive
@@ -51,7 +49,7 @@ jobs:
             Copy-Item $compDll.FullName "package/components/GroundAndreas.dll" -Force
           }
 
-          # Copy Includes, Data, Examples and License
+          # Copy Includes, Data, Examples and License (standalone - no README.md)
           if (Test-Path "GroundAndreas.inc") { Copy-Item "GroundAndreas.inc" "package/include/GroundAndreas.inc" -Force }
           if (Test-Path "scriptfiles/SAfull.hmap") { Copy-Item "scriptfiles/SAfull.hmap" "package/scriptfiles/SAfull.hmap" -Force }
           if (Test-Path "Example.pwn") { Copy-Item "Example.pwn" "package/Example.pwn" -Force }
@@ -72,7 +70,7 @@ jobs:
   build-linux-release:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           clean: true
           submodules: recursive
@@ -105,7 +103,7 @@ jobs:
             cp "$COMP_SO" "package/components/GroundAndreas.so"
           fi
 
-          # Copy Includes, Data, Examples and License
+          # Copy Includes, Data, Examples and License (standalone - no README.md)
           [ -f "GroundAndreas.inc" ] && cp "GroundAndreas.inc" "package/include/GroundAndreas.inc"
           [ -f "scriptfiles/SAfull.hmap" ] && cp "scriptfiles/SAfull.hmap" "package/scriptfiles/SAfull.hmap"
           [ -f "Example.pwn" ] && cp "Example.pwn" "package/Example.pwn"
@@ -121,31 +119,3 @@ jobs:
         with:
           name: GroundAndreas-Linux
           path: dist/GroundAndreas-Linux.zip
-
-  create-release:
-    needs: [build-windows-release, build-linux-release]
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download Windows Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: GroundAndreas-Windows
-          path: dist
-
-      - name: Download Linux Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: GroundAndreas-Linux
-          path: dist
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/GroundAndreas-Windows.zip
-            dist/GroundAndreas-Linux.zip

@@ -79,6 +79,10 @@ if exist "LICENSE" (
 
 :: Clean up previous files in dist
 if exist "dist\GroundAndreas-Windows.zip" del /f /q "dist\GroundAndreas-Windows.zip"
+if exist "dist\plugins" rmdir /s /q "dist\plugins"
+if exist "dist\components" rmdir /s /q "dist\components"
+if exist "dist\include" rmdir /s /q "dist\include"
+if exist "dist\scriptfiles" rmdir /s /q "dist\scriptfiles"
 
 :: Generate zip archive
 where tar.exe >nul 2>nul
