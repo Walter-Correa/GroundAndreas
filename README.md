@@ -336,6 +336,12 @@ cmake --build build --config Release
 
 ---
 
+## Credits
+
+* [@Walter-Correa](https://github.com/Walter-Correa) - Creator and author of the GroundAndreas project.
+
+---
+
 ## License
 
 This project is licensed under the **Mozilla Public License Version 2.0 (MPL-2.0)** - see the [LICENSE](LICENSE) file for details.
