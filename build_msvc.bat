@@ -57,6 +57,7 @@ mkdir "%STAGE_DIR%\plugins"
 mkdir "%STAGE_DIR%\components"
 mkdir "%STAGE_DIR%\include"
 mkdir "%STAGE_DIR%\scriptfiles"
+mkdir "%STAGE_DIR%\filterscripts"
 
 if exist "build-msvc\Release\GroundAndreas.dll" (
     copy /Y "build-msvc\Release\GroundAndreas.dll" "%STAGE_DIR%\plugins\GroundAndreas.dll" >nul
@@ -70,8 +71,13 @@ if exist "GroundAndreas.inc" (
 if exist "scriptfiles\SAfull.hmap" (
     copy /Y "scriptfiles\SAfull.hmap" "%STAGE_DIR%\scriptfiles\SAfull.hmap" >nul
 )
-if exist "Example.pwn" (
-    copy /Y "Example.pwn" "%STAGE_DIR%\Example.pwn" >nul
+if exist "FS_GroundAndreas_Demo.pwn" (
+    copy /Y "FS_GroundAndreas_Demo.pwn" "%STAGE_DIR%\FS_GroundAndreas_Demo.pwn" >nul
+    copy /Y "FS_GroundAndreas_Demo.pwn" "%STAGE_DIR%\filterscripts\FS_GroundAndreas_Demo.pwn" >nul
+)
+if exist "FS_GroundAndreas_Demo.amx" (
+    copy /Y "FS_GroundAndreas_Demo.amx" "%STAGE_DIR%\FS_GroundAndreas_Demo.amx" >nul
+    copy /Y "FS_GroundAndreas_Demo.amx" "%STAGE_DIR%\filterscripts\FS_GroundAndreas_Demo.amx" >nul
 )
 if exist "LICENSE" (
     copy /Y "LICENSE" "%STAGE_DIR%\LICENSE" >nul

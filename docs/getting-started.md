@@ -55,8 +55,14 @@ Copy the plugin binary into your server's `plugins/` directory:
 
 Add `GroundAndreas` to your `server.cfg`:
 ```ini
+# Windows
 plugins GroundAndreas
+# Linux
+plugins GroundAndreas.so
 ```
+
+> [!NOTE]
+> On open.mp, use either the component (recommended, placed in `components/`) or the legacy plugin (placed in `plugins/`), not both.
 
 ---
 
@@ -100,11 +106,11 @@ GroundAndreas is designed as a direct, modern successor to MapAndreas. It provid
 | Legacy MapAndreas | GroundAndreas Modern Standard | Key Differences & Improvements |
 | :--- | :--- | :--- |
 | `MapAndreas_Init(MAP_ANDREAS_MODE_FULL)` | Handled automatically at boot | Zero boot lag; no manual mode constants required. |
-| `MapAndreas_FindZ_For2DCoord(x, y, &z)` | `GetGroundZPos(x, y, z)` | GroundAndreas defaults to smooth bilinear interpolation ($z \pm 1\text{mm}$). |
+| `MapAndreas_FindZ_For2DCoord(x, y, &z)` | `GetGroundZPos(x, y, z)` | GroundAndreas defaults to smooth bilinear interpolation (1 m grid, 1 cm vertical resolution). |
 | Discrete integer grid staircase ($1\text{m}$) | Bilinear interpolation (`interpolate = true`) | Eliminates jagged staircases on hills, mountain roads, and ramps. |
-| Returns underwater seabed | `water_surface = true` (default) | Ocean returns $Z = 0.0\text{m}$ sea level automatically; pass `false` for seabed floor. |
+| Unhandled water elevations | Water system + 44 inland bodies | Physical surface and submersion detection across ocean and 44 inland bodies. |
 | `MapAndreas_Unload()` | `GroundAndreas_Unload()` | Releases virtual memory mappings and resets state. |
-| Heavy AMX loop overhead | `GetGroundZPosBatch(...)` | Processes coordinate arrays directly inside C++ at 10,000 queries in ~15ms. |
+| Heavy AMX loop overhead | `GetGroundZPosBatch(...)` | Processes coordinate arrays directly inside C++ in a single native call (< 1 ms for 10,000 queries). |
 
 > [!TIP]
 > GroundAndreas retains internal aliases for `GetGroundZ` and `GetGroundZBatch` inside its C++ dispatch table, ensuring backward compatibility with code expecting legacy names.

@@ -1,5 +1,4 @@
 # Bytecode and build artifacts
-*.amx
 *.lst
 *.asm
 *.o
@@ -31,3 +30,9 @@ server.cfg
 server_log.txt
 crashinfo.txt
 samp.ban
+
+# Temporary directories and untracked scratch files
+scratch/
+scriptfiles/objects.dat
+*.gpatch
+*.tmp

@@ -1,40 +1,46 @@
 {
-	"user": "Walter-Correa",
-	"repo": "GroundAndreas",
-	"version": "1.0.0",
-	"entry": "Example.pwn",
-	"output": "Example.amx",
-	"dependencies": [
-		"sampctl/samp-stdlib"
-	],
-	"resources": [
-		{
-			"name": "GroundAndreas-Windows.zip",
-			"platform": "windows",
-			"archive": true,
-			"includes": [
-				"GroundAndreas.inc"
-			],
-			"plugins": [
-				"GroundAndreas.dll"
-			],
-			"files": {
-				"SAfull.hmap": "scriptfiles/SAfull.hmap"
-			}
-		},
-		{
-			"name": "GroundAndreas-Linux.zip",
-			"platform": "linux",
-			"archive": true,
-			"includes": [
-				"GroundAndreas.inc"
-			],
-			"plugins": [
-				"GroundAndreas.so"
-			],
-			"files": {
-				"SAfull.hmap": "scriptfiles/SAfull.hmap"
-			}
-		}
-	]
+    "user": "Walter-Correa",
+    "repo": "GroundAndreas",
+    "version": "1.1.0",
+    "entry": "FS_GroundAndreas_Demo.pwn",
+    "output": "FS_GroundAndreas_Demo.amx",
+    "dependencies": [
+        "sampctl/samp-stdlib"
+    ],
+    "resources": [
+        {
+            "name": "GroundAndreas-Windows.zip",
+            "platform": "windows",
+            "archive": true,
+            "includes": [
+                "GroundAndreas.inc"
+            ],
+            "plugins": [
+                "GroundAndreas.dll"
+            ],
+            "files": {
+                "SAfull.hmap": "scriptfiles/SAfull.hmap"
+            },
+            "components": [
+                "GroundAndreas.dll"
+            ]
+        },
+        {
+            "name": "GroundAndreas-Linux.zip",
+            "platform": "linux",
+            "archive": true,
+            "includes": [
+                "GroundAndreas.inc"
+            ],
+            "plugins": [
+                "GroundAndreas.so"
+            ],
+            "files": {
+                "SAfull.hmap": "scriptfiles/SAfull.hmap"
+            },
+            "components": [
+                "GroundAndreas.so"
+            ]
+        }
+    ]
 }

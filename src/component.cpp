@@ -16,10 +16,13 @@
 #include "common.h"
 #include "natives.h"
 #include "heightmap.h"
+#include "version.h"
 
 logprintf_t logprintf = nullptr;
 
-static ICore* g_core = nullptr;
+IVehiclesComponent* g_vehiclesComponent = nullptr;
+
+ICore* g_core = nullptr;
 
 static void ComponentLogprintf(const char* format, ...)
 {
@@ -39,8 +42,8 @@ static void ComponentLogprintf(const char* format, ...)
     }
 }
 
-// SAGround in hex: 0x47726f756e64416e
-static const UID GroundAndreasComponent_UID = UID(0x47726f756e64416e);
+// T13 (B10): Proper random 64-bit UID for open.mp component
+static const UID GroundAndreasComponent_UID = UID(0x7a8c4e512b930d64ULL);
 
 class GroundAndreasComponent final : public IComponent, public PawnEventHandler
 {
@@ -58,38 +61,76 @@ public:
 
     SemanticVersion componentVersion() const override
     {
-        return SemanticVersion(1, 0, 0, 0);
+        return SemanticVersion(GROUNDANDREAS_VERSION_MAJOR, GROUNDANDREAS_VERSION_MINOR, GROUNDANDREAS_VERSION_PATCH, 0);
     }
 
     void onLoad(ICore* c) override
     {
-        core_ = c;
-        g_core = c;
-        logprintf = ComponentLogprintf;
-
-        core_->printLn("--------------------------------------------------");
-        core_->printLn("  GroundAndreas v1.0.0 (open.mp Component)");
-        core_->printLn("  Ultra-Fast Memory-Mapped Heightmap Engine");
-        core_->printLn("--------------------------------------------------");
-
-        if (HeightMap::Instance().Load("scriptfiles/SAfull.hmap") ||
-            HeightMap::Instance().Load("SAfull.hmap"))
+        try
         {
-            core_->printLn("  [GroundAndreas] Map loaded: %s", HeightMap::Instance().GetLoadedPath().c_str());
+            core_ = c;
+            g_core = c;
+            logprintf = ComponentLogprintf;
+
+            // T13 (B9): Process environment sentinel check
+#if defined(_WIN32) || defined(WIN32)
+            char envBuf[8] = { 0 };
+            if (GetEnvironmentVariableA("GROUNDANDREAS_LOADED", envBuf, sizeof(envBuf)) > 0)
+            {
+                core_->printLn("  [GroundAndreas] WARNING: Another GroundAndreas instance (plugin or component) is already active in this process!");
+            }
+            SetEnvironmentVariableA("GROUNDANDREAS_LOADED", "1");
+#else
+            if (getenv("GROUNDANDREAS_LOADED") != nullptr)
+            {
+                core_->printLn("  [GroundAndreas] WARNING: Another GroundAndreas instance (plugin or component) is already active in this process!");
+            }
+            setenv("GROUNDANDREAS_LOADED", "1", 1);
+#endif
+
+            core_->printLn("--------------------------------------------------");
+            core_->printLn("  GroundAndreas v%s (open.mp Component)", GROUNDANDREAS_VERSION_STRING);
+            core_->printLn("  Ultra-Fast Memory-Mapped Heightmap Engine");
+            core_->printLn("--------------------------------------------------");
+
+            if (HeightMap::Instance().Load("scriptfiles/SAfull.hmap") ||
+                HeightMap::Instance().Load("SAfull.hmap"))
+            {
+                core_->printLn("  [GroundAndreas] Map loaded: %s", HeightMap::Instance().GetLoadedPath().c_str());
+            }
+            else
+            {
+                core_->printLn("  [GroundAndreas] Notice: SAfull.hmap not found in scriptfiles/. Call GroundAndreas_Init() from Pawn if needed.");
+            }
         }
-        else
+        catch (const std::exception& e)
         {
-            core_->printLn("  [GroundAndreas] Notice: SAfull.hmap not found in scriptfiles/. Call GroundAndreas_Init() from Pawn if needed.");
+            if (core_ != nullptr) core_->printLn("[GroundAndreas] Exception in onLoad: %s", e.what());
+        }
+        catch (...)
+        {
         }
     }
 
     void onInit(IComponentList* components) override
     {
-        pawn_ = components->queryComponent<IPawnComponent>();
-        if (pawn_ != nullptr)
+        try
         {
-            pAMXFunctions = const_cast<void**>(pawn_->getAmxFunctions().data());
-            pawn_->getEventDispatcher().addEventHandler(this);
+            pawn_ = components->queryComponent<IPawnComponent>();
+            g_vehiclesComponent = components->queryComponent<IVehiclesComponent>();
+            
+            if (pawn_ != nullptr)
+            {
+                pAMXFunctions = const_cast<void**>(pawn_->getAmxFunctions().data());
+                pawn_->getEventDispatcher().addEventHandler(this);
+            }
+        }
+        catch (const std::exception& e)
+        {
+            if (core_ != nullptr) core_->printLn("[GroundAndreas] Exception in onInit: %s", e.what());
+        }
+        catch (...)
+        {
         }
     }
 
@@ -99,19 +140,40 @@ public:
 
     void onFree(IComponent* component) override
     {
-        if (component == pawn_)
+        try
         {
-            pawn_ = nullptr;
+            if (component == pawn_)
+            {
+                pawn_ = nullptr;
+            }
+            else if (component == g_vehiclesComponent)
+            {
+                g_vehiclesComponent = nullptr;
+            }
+        }
+        catch (...)
+        {
         }
     }
 
     void free() override
     {
-        HeightMap::Instance().Unload();
-
-        if (pawn_ != nullptr)
+        try
         {
-            pawn_->getEventDispatcher().removeEventHandler(this);
+#if defined(_WIN32) || defined(WIN32)
+            SetEnvironmentVariableA("GROUNDANDREAS_LOADED", nullptr);
+#else
+            unsetenv("GROUNDANDREAS_LOADED");
+#endif
+            HeightMap::Instance().Unload();
+
+            if (pawn_ != nullptr)
+            {
+                pawn_->getEventDispatcher().removeEventHandler(this);
+            }
+        }
+        catch (...)
+        {
         }
         delete this;
     }
@@ -123,8 +185,18 @@ public:
     // PawnEventHandler
     void onAmxLoad(IPawnScript& script) override
     {
-        AMX* amx = script.GetAMX();
-        amx_Register(amx, PluginNatives, -1);
+        try
+        {
+            AMX* amx = script.GetAMX();
+            amx_Register(amx, PluginNatives, -1);
+        }
+        catch (const std::exception& e)
+        {
+            if (core_ != nullptr) core_->printLn("[GroundAndreas] Exception in onAmxLoad: %s", e.what());
+        }
+        catch (...)
+        {
+        }
     }
 
     void onAmxUnload(IPawnScript& script) override
@@ -134,5 +206,12 @@ public:
 
 COMPONENT_ENTRY_POINT()
 {
-    return new GroundAndreasComponent();
+    try
+    {
+        return new GroundAndreasComponent();
+    }
+    catch (...)
+    {
+        return nullptr;
+    }
 }

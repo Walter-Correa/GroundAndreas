@@ -9,8 +9,9 @@ struct WaterVolume
     float maxX;
     float minY;
     float maxY;
-    float bottomZ;
     float surfaceZ;
+    float maxDepth;
+    int flag;
 };
 
 class WaterSystem

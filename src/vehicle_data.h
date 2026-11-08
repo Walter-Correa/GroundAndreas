@@ -225,6 +225,223 @@ static constexpr VehicleDimensions VEHICLE_MODEL_SIZES[212] = {
     { 2.130000f, 3.160000f, 1.830000f }, // Model 611
 };
 
+
+// Wheel positions derived from open.mp SDK vehicle_models.hpp (MIT License, Copyright (c) 2022 open.mp)
+static constexpr float VEHICLE_WHEEL_LOWEST_Z[212] = {
+       -0.610000f, // Model 400
+       -0.349999f, // Model 401
+       -0.349999f, // Model 402
+       -0.949999f, // Model 403
+       -0.330000f, // Model 404
+       -0.449999f, // Model 405
+       -1.250000f, // Model 406
+       -0.699999f, // Model 407
+       -0.970000f, // Model 408
+       -0.349999f, // Model 409
+       -0.289999f, // Model 410
+       -0.349999f, // Model 411
+       -0.349999f, // Model 412
+       -0.639999f, // Model 413
+       -0.620000f, // Model 414
+       -0.360000f, // Model 415
+       -0.670000f, // Model 416
+             0.0f, // Model 417
+       -0.680000f, // Model 418
+       -0.430000f, // Model 419
+       -0.349999f, // Model 420
+       -0.479999f, // Model 421
+       -0.550000f, // Model 422
+       -0.629999f, // Model 423
+       -0.280000f, // Model 424
+             0.0f, // Model 425
+       -0.349999f, // Model 426
+       -0.529999f, // Model 427
+       -0.639999f, // Model 428
+       -0.250000f, // Model 429
+             0.0f, // Model 430
+       -0.500000f, // Model 431
+       -0.349999f, // Model 432
+       -0.800000f, // Model 433
+       -0.589999f, // Model 434
+       -0.949999f, // Model 435
+       -0.349999f, // Model 436
+       -0.500000f, // Model 437
+       -0.550000f, // Model 438
+       -0.449999f, // Model 439
+       -0.750000f, // Model 440
+        0.029999f, // Model 441
+       -0.460000f, // Model 442
+       -0.959999f, // Model 443
+       -0.449999f, // Model 444
+       -0.460000f, // Model 445
+             0.0f, // Model 446
+             0.0f, // Model 447
+       -0.270000f, // Model 448
+             0.0f, // Model 449
+       -0.949999f, // Model 450
+       -0.219999f, // Model 451
+             0.0f, // Model 452
+             0.0f, // Model 453
+             0.0f, // Model 454
+       -0.800000f, // Model 455
+       -0.579999f, // Model 456
+       -0.349999f, // Model 457
+       -0.439999f, // Model 458
+       -0.639999f, // Model 459
+             0.0f, // Model 460
+       -0.180000f, // Model 461
+       -0.270000f, // Model 462
+       -0.180000f, // Model 463
+       -0.280000f, // Model 464
+       -0.250000f, // Model 465
+       -0.349999f, // Model 466
+       -0.349999f, // Model 467
+       -0.289999f, // Model 468
+             0.0f, // Model 469
+       -0.310000f, // Model 470
+       -0.129999f, // Model 471
+             0.0f, // Model 472
+             0.0f, // Model 473
+       -0.349999f, // Model 474
+       -0.349999f, // Model 475
+             0.0f, // Model 476
+       -0.319999f, // Model 477
+       -0.550000f, // Model 478
+       -0.379999f, // Model 479
+       -0.349999f, // Model 480
+       -0.239999f, // Model 481
+       -0.649999f, // Model 482
+       -0.670000f, // Model 483
+             0.0f, // Model 484
+       -0.300000f, // Model 485
+       -0.349999f, // Model 486
+             0.0f, // Model 487
+             0.0f, // Model 488
+       -0.660000f, // Model 489
+       -0.660000f, // Model 490
+       -0.419999f, // Model 491
+       -0.349999f, // Model 492
+             0.0f, // Model 493
+       -0.400000f, // Model 494
+       -0.759999f, // Model 495
+       -0.319999f, // Model 496
+             0.0f, // Model 497
+       -0.579999f, // Model 498
+       -0.550000f, // Model 499
+       -0.620000f, // Model 500
+       -0.250000f, // Model 501
+       -0.400000f, // Model 502
+       -0.400000f, // Model 503
+       -0.349999f, // Model 504
+       -0.660000f, // Model 505
+       -0.340000f, // Model 506
+       -0.449999f, // Model 507
+       -0.899999f, // Model 508
+       -0.239999f, // Model 509
+       -0.259999f, // Model 510
+             0.0f, // Model 511
+             0.0f, // Model 512
+             0.0f, // Model 513
+       -0.949999f, // Model 514
+       -1.389999f, // Model 515
+       -0.419999f, // Model 516
+       -0.409999f, // Model 517
+       -0.270000f, // Model 518
+             0.0f, // Model 519
+             0.0f, // Model 520
+       -0.159999f, // Model 521
+       -0.159999f, // Model 522
+       -0.159999f, // Model 523
+       -1.309999f, // Model 524
+       -0.379999f, // Model 525
+       -0.400000f, // Model 526
+       -0.349999f, // Model 527
+       -0.610000f, // Model 528
+       -0.250000f, // Model 529
+       -0.419999f, // Model 530
+       -0.620000f, // Model 531
+       -1.710000f, // Model 532
+       -0.349999f, // Model 533
+       -0.270000f, // Model 534
+       -0.330000f, // Model 535
+       -0.349999f, // Model 536
+             0.0f, // Model 537
+             0.0f, // Model 538
+             0.0f, // Model 539
+       -0.469999f, // Model 540
+       -0.250000f, // Model 541
+       -0.370000f, // Model 542
+       -0.449999f, // Model 543
+       -0.699999f, // Model 544
+       -0.449999f, // Model 545
+       -0.340000f, // Model 546
+       -0.349999f, // Model 547
+       -2.430000f, // Model 548
+       -0.360000f, // Model 549
+       -0.419999f, // Model 550
+       -0.430000f, // Model 551
+       -0.180000f, // Model 552
+             0.0f, // Model 553
+       -0.569999f, // Model 554
+       -0.330000f, // Model 555
+       -0.449999f, // Model 556
+       -0.449999f, // Model 557
+       -0.250000f, // Model 558
+       -0.250000f, // Model 559
+       -0.250000f, // Model 560
+       -0.409999f, // Model 561
+       -0.310000f, // Model 562
+             0.0f, // Model 563
+        0.029999f, // Model 564
+       -0.270000f, // Model 565
+       -0.349999f, // Model 566
+       -0.479999f, // Model 567
+       -0.500000f, // Model 568
+             0.0f, // Model 569
+             0.0f, // Model 570
+       -0.159999f, // Model 571
+       -0.349999f, // Model 572
+       -0.930000f, // Model 573
+       -0.439999f, // Model 574
+       -0.250000f, // Model 575
+       -0.250000f, // Model 576
+             0.0f, // Model 577
+       -1.000000f, // Model 578
+       -0.439999f, // Model 579
+       -0.300000f, // Model 580
+       -0.159999f, // Model 581
+       -0.620000f, // Model 582
+       -0.219999f, // Model 583
+       -1.450000f, // Model 584
+       -0.230000f, // Model 585
+       -0.159999f, // Model 586
+       -0.360000f, // Model 587
+       -0.469999f, // Model 588
+       -0.230000f, // Model 589
+             0.0f, // Model 590
+       -0.949999f, // Model 591
+             0.0f, // Model 592
+             0.0f, // Model 593
+        0.070000f, // Model 594
+             0.0f, // Model 595
+       -0.349999f, // Model 596
+       -0.349999f, // Model 597
+       -0.349999f, // Model 598
+       -0.660000f, // Model 599
+       -0.340000f, // Model 600
+       -0.070000f, // Model 601
+       -0.400000f, // Model 602
+       -0.409999f, // Model 603
+       -0.349999f, // Model 604
+       -0.449999f, // Model 605
+       -0.689999f, // Model 606
+       -0.699999f, // Model 607
+       -1.169999f, // Model 608
+       -0.579999f, // Model 609
+       -0.140000f, // Model 610
+       -0.250000f, // Model 611
+};
+
 inline bool GetVehicleModelDimensions(int modelId, float& sizeX, float& sizeY, float& sizeZ)
 {
     if (modelId < 400 || modelId > 611)
@@ -248,4 +465,74 @@ inline float GetVehicleModelSizeZ(int modelId)
         return 1.5f;
     }
     return VEHICLE_MODEL_SIZES[modelId - 400].z;
+}
+
+inline float GetVehicleBaseGroundOffset(int modelId)
+{
+    // a) Exceptions: only models whose measured offset differs from the wheel formula by more than 0.15 m.
+    //    Add a model here only with an in-game measurement (parked on flat ground, HUD GetGroundClearance).
+    switch (modelId)
+    {
+        // Kart: very small wheels (radius ~0.12 m). The generic formula (-wheelZ + 0.35 m)
+        // gives 0.51 m vs 0.28 m measured in-game, so it needs an explicit value.
+        case 571:
+            return 0.28f;
+    }
+
+    // b) Offset derived from lowest wheel position + default wheel radius
+    if (modelId >= 400 && modelId <= 611)
+    {
+        const float wheelLowestZ = VEHICLE_WHEEL_LOWEST_Z[modelId - 400];
+        if (wheelLowestZ < 0.0f)
+        {
+            constexpr float kDefaultWheelRadius = 0.35f;
+            return -wheelLowestZ + kDefaultWheelRadius;
+        }
+    }
+
+    // c) Fallback for vehicles without wheel data (boats, trains, tram, hovercraft, helicopters, planes)
+    switch (modelId)
+    {
+        // Helicopters
+        case 487: // Maverick
+        case 488: // SAN News Maverick
+        case 497: // Police Maverick
+            return 1.1082f;
+        case 469: // Sparrow
+        case 447: // Seasparrow
+            return 1.0500f;
+        case 425: // Hunter
+            return 1.2000f;
+        case 563: // Raindance
+            return 1.4000f;
+        case 417: // Leviathan
+            return 1.6000f;
+
+        // Airplanes
+        case 460: // Skimmer
+            return 1.3500f;
+        case 476: // Rustler
+            return 1.0500f;
+        case 511: // Beagle
+            return 1.2000f;
+        case 512: // Cropduster
+            return 1.1000f;
+        case 513: // Stuntplane
+            return 1.0000f;
+        case 519: // Shamal
+            return 1.5000f;
+        case 520: // Hydra
+            return 1.4000f;
+        case 553: // Nevada
+            return 2.1500f;
+        case 577: // AT-400
+            return 4.2000f;
+        case 592: // Andromada
+            return 3.6000f;
+        case 593: // Dodo
+            return 1.0500f;
+
+        default:
+            return 0.9000f;
+    }
 }

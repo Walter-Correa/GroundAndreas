@@ -17,7 +17,7 @@ native bool:IsGroundSafeForSpawn(Float:x, Float:y, Float:max_slope = 15.0);
 ```
 
 * **World Boundary Verification:** Ensures coordinates are strictly within $[-3000.0, +3000.0]$.
-* **Dry Land Verification:** Verifies the location is not submerged in the ocean or any of the 16 inland water bodies.
+* **Dry Land Verification:** Verifies the location is not submerged in the ocean or any of the 44 inland water bodies.
 * **Slope Verification:** Ensures terrain inclination does not exceed `max_slope` degrees (defaults to $15.0^\circ$, ensuring vehicles do not slide down hills).
 * **Returns:** `true` if safe; `false` otherwise.
 
@@ -227,3 +227,9 @@ stock bool:IsValidDropZone(Float:centerX, Float:centerY, Float:radius)
     return false;
 }
 ```
+
+
+---
+
+> [!TIP]
+> For calculating average, peak, and lowest elevations across gangzones (`GetGroundZPosArea`) or circular zones (`GetGroundZPosRadius`), see the **[Core Elevation Queries](elevation-and-raycasting.md#getgroundzposarea)** section.

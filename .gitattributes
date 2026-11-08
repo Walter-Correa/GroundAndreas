@@ -1,4 +1,14 @@
+* text=auto
+*.cpp text eol=lf
+*.h text eol=lf
+*.inc text eol=lf
+*.pwn text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.yml text eol=lf
+*.bat text eol=crlf
 *.hmap binary
 *.dat binary
 *.dll binary
 *.so binary
+*.zip binary

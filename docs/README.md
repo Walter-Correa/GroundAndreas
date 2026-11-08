@@ -13,7 +13,7 @@ Welcome to the comprehensive technical documentation for **GroundAndreas** (SA-M
 | **[Underground & Water Detection](underground-and-water.md)** | Subterranean collision detection (points, players, and 212 vehicle models) and dual-layer ocean & inland water dynamics. |
 | **[Dynamic Terrain & Objects](dynamic-terrain-and-objects.md)** | Terrain reconstruction upon building removal, automated `RemoveBuildingForPlayer` hook, object surface stamping, and disk baking. |
 | **[Terrain Analytics & Kinematics](terrain-analytics-and-kinematics.md)** | Safe spawn search, GPWS aircraft impact kinematics under gravity, radar shadow occlusion, and topographic zone statistics. |
-| **[Complete API Reference](api-reference.md)** | Exhaustive technical dictionary with all 32 natives, parameter types, default values, return values, and macros. |
+| **[Complete API Reference](api-reference.md)** | Exhaustive technical dictionary with all 40 natives, parameter types, default values, return values, and macros. |
 
 ---
 
@@ -49,6 +49,9 @@ Find immediate guidance based on your development goal:
 * **I am building aircraft instruments (GPWS "PULL UP" warnings or parachute drops):**
   * Read [Ballistic Impact Kinematics](terrain-analytics-and-kinematics.md#2-aircraft-altimeter--impact-kinematics).
   * Use `GetGroundImpactTime(x, y, z, vz, seconds_to_impact, impact_z);`.
+* **I want to calculate the average, highest, or lowest terrain elevation in a gangzone or circular radius:**
+  * Read [Regional & Radial Ground Elevation](elevation-and-raycasting.md#getgroundzposarea).
+  * Use `GetGroundZPosArea(minx, miny, maxx, maxy, avg_z, max_z, min_z);` or `GetGroundZPosRadius(x, y, radius, avg_z, max_z, min_z);`.
 
 ---
 
@@ -67,4 +70,4 @@ Find immediate guidance based on your development goal:
 ---
 
 > [!NOTE]
-> All code snippets and API signatures in these documents are production-ready, fully typed, and verified against GroundAndreas v1.0.0.
+> All code snippets and API signatures in these documents are production-ready, fully typed, and verified against GroundAndreas v1.1.0.

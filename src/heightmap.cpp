@@ -21,6 +21,7 @@ HeightMap::~HeightMap()
 bool HeightMap::Load(const std::string& filepath)
 {
     Unload();
+    InitObjectDatabase();
 
 #if defined(_WIN32) || defined(WIN32)
     m_hFile = CreateFileA(
@@ -45,8 +46,7 @@ bool HeightMap::Load(const std::string& filepath)
                 if (m_data != nullptr)
                 {
                     m_isMmap = true;
-                    m_isLoaded = true;
-                    m_loadedPath = filepath;
+                    OnLoaded(filepath);
                     return true;
                 }
                 CloseHandle(m_hMapping);
@@ -68,8 +68,7 @@ bool HeightMap::Load(const std::string& filepath)
             {
                 m_data = static_cast<uint16_t*>(mapped);
                 m_isMmap = true;
-                m_isLoaded = true;
-                m_loadedPath = filepath;
+                OnLoaded(filepath);
                 return true;
             }
         }
@@ -91,14 +90,20 @@ bool HeightMap::Load(const std::string& filepath)
             {
                 m_data = m_fallbackBuffer.data();
                 m_isMmap = false;
-                m_isLoaded = true;
-                m_loadedPath = filepath;
+                OnLoaded(filepath);
                 return true;
             }
         }
     }
 
     return false;
+}
+
+void HeightMap::OnLoaded(const std::string& path)
+{
+    m_isLoaded = true;
+    m_loadedPath = path;
+    m_dirtyCells.assign((MAP_TOTAL_CELLS + 63) / 64, 0ULL);
 }
 
 void HeightMap::Unload()
@@ -144,12 +149,19 @@ void HeightMap::Unload()
         m_isMmap = false;
         m_loadedPath.clear();
         m_removedBuildings.clear();
-        m_modifiedCells.clear();
+        m_carvedAreas.clear();
+        m_appliedObjectKeys.clear();
+        m_dirtyCells.clear();
+        m_appliedObjects.clear();
     }
 }
 
 bool HeightMap::WorldToGrid(float x, float y, int& gx, int& gy) const
 {
+    if (!std::isfinite(x) || !std::isfinite(y))
+    {
+        return false;
+    }
     if (x < MAP_MIN_X || x > MAP_MAX_X || y < MAP_MIN_Y || y > MAP_MAX_Y)
     {
         return false;
@@ -170,19 +182,13 @@ bool HeightMap::WorldToGrid(float x, float y, int& gx, int& gy) const
     return true;
 }
 
-float HeightMap::ReadHeightRaw(int gx, int gy) const
-{
-    if (!m_isLoaded || m_data == nullptr)
-    {
-        return 0.0f;
-    }
-
-    const size_t index = static_cast<size_t>(gy) * MAP_GRID_WIDTH + static_cast<size_t>(gx);
-    return static_cast<float>(m_data[index]) * 0.01f;
-}
-
 bool HeightMap::GetZ(float x, float y, float& z, bool interpolate, bool waterSurface) const
 {
+    if (!std::isfinite(x) || !std::isfinite(y))
+    {
+        z = 0.0f;
+        return false;
+    }
     if (!m_isLoaded || m_data == nullptr)
     {
         z = 0.0f;
@@ -199,7 +205,7 @@ bool HeightMap::GetZ(float x, float y, float& z, bool interpolate, bool waterSur
     {
         int gx = 0, gy = 0;
         WorldToGrid(x, y, gx, gy);
-        z = ReadHeightRaw(gx, gy);
+        z = ReadHeightFast(gx, gy);
     }
     else
     {
@@ -222,10 +228,10 @@ bool HeightMap::GetZ(float x, float y, float& z, bool interpolate, bool waterSur
         const float u = std::clamp(fx - static_cast<float>(x0), 0.0f, 1.0f);
         const float v = std::clamp(fy - static_cast<float>(y0), 0.0f, 1.0f);
 
-        const float z00 = ReadHeightRaw(x0, y0);
-        const float z10 = ReadHeightRaw(x1, y0);
-        const float z01 = ReadHeightRaw(x0, y1);
-        const float z11 = ReadHeightRaw(x1, y1);
+        const float z00 = ReadHeightFast(x0, y0);
+        const float z10 = ReadHeightFast(x1, y0);
+        const float z01 = ReadHeightFast(x0, y1);
+        const float z11 = ReadHeightFast(x1, y1);
 
         const float zTop = z00 * (1.0f - u) + z10 * u;
         const float zBot = z01 * (1.0f - u) + z11 * u;
@@ -277,6 +283,7 @@ void HeightMap::GetBilinearGradients(float x, float y, float& dz_dx, float& dz_d
 
 bool HeightMap::GetNormal(float x, float y, float& nx, float& ny, float& nz, float& slopeDegrees) const
 {
+    if (!std::isfinite(x) || !std::isfinite(y)) return false;
     if (!m_isLoaded || m_data == nullptr)
     {
         nx = 0.0f; ny = 0.0f; nz = 1.0f;
@@ -321,6 +328,7 @@ bool HeightMap::GetNormal(float x, float y, float& nx, float& ny, float& nz, flo
 
 bool HeightMap::GetObjectRotation(float x, float y, float facingAngle, float& rx, float& ry) const
 {
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(facingAngle)) return false;
     if (!m_isLoaded || m_data == nullptr)
     {
         rx = 0.0f; ry = 0.0f;
@@ -337,26 +345,38 @@ bool HeightMap::GetObjectRotation(float x, float y, float facingAngle, float& rx
     float dz_dy = 0.0f;
     GetBilinearGradients(x, y, dz_dx, dz_dy);
 
-    // SA-MP Compass Heading: 0 deg = North (+Y), 90 deg = West (-X), 180 deg = South (-Y), 270 deg = East (+X)
+    // Surface normal vector: N = (-dz_dx, -dz_dy, 1) normalized
+    float nx = -dz_dx;
+    float ny = -dz_dy;
+    float nz = 1.0f;
+    const float len = std::sqrt(nx * nx + ny * ny + nz * nz);
+    if (len > 0.0001f)
+    {
+        nx /= len;
+        ny /= len;
+        nz /= len;
+    }
+
+    // In GTA SA, Euler rotation order for objects is R = Rz(facingAngle) * Ry(ry) * Rx(rx).
+    // To align the object's local UP vector (0, 0, 1) with the terrain normal N:
+    // Un-rotate the normal by Rz(facingAngle):
     const float headingRad = facingAngle * DEG_TO_RAD;
-    const float fwdX = -std::sin(headingRad);
-    const float fwdY = std::cos(headingRad);
+    const float crz = std::cos(headingRad);
+    const float srz = std::sin(headingRad);
 
-    // Right vector (perpendicular to forward):
-    const float rightX = std::cos(headingRad);
-    const float rightY = std::sin(headingRad);
+    const float unX = crz * nx + srz * ny;
+    const float unY = -srz * nx + crz * ny;
+    const float unZ = nz;
 
-    // Directional slopes along forward (Pitch) and right (Roll) axes:
-    const float slopeFwd = fwdX * dz_dx + fwdY * dz_dy;
-    const float slopeRight = rightX * dz_dx + rightY * dz_dy;
-
-    rx = std::atan(slopeFwd) * RAD_TO_DEG;
-    ry = -std::atan(slopeRight) * RAD_TO_DEG;
+    // Solve for local Euler angles rx and ry:
+    rx = std::asin(std::clamp(-unY, -1.0f, 1.0f)) * RAD_TO_DEG;
+    ry = std::atan2(unX, unZ) * RAD_TO_DEG;
     return true;
 }
 
 bool HeightMap::RaycastLine(float x1, float y1, float z1, float x2, float y2, float z2, float& hitX, float& hitY, float& hitZ) const
 {
+    if (!std::isfinite(x1) || !std::isfinite(y1) || !std::isfinite(z1) || !std::isfinite(x2) || !std::isfinite(y2) || !std::isfinite(z2)) return false;
     if (!m_isLoaded || m_data == nullptr)
     {
         return false;
@@ -452,17 +472,25 @@ bool HeightMap::RaycastLine(float x1, float y1, float z1, float x2, float y2, fl
 
 bool HeightMap::IsUnderwater(float x, float y, float& waterDepth) const
 {
-    float groundZ = 0.0f;
-    if (!GetZ(x, y, groundZ, true, false))
+    if (!std::isfinite(x) || !std::isfinite(y)) return false;
+    float surfaceZ = 0.0f;
+    float bottomZ = 0.0f;
+    if (WaterSystem::GetWaterLevelAt(x, y, surfaceZ, bottomZ))
     {
-        waterDepth = 0.0f;
-        return false;
-    }
-
-    if (groundZ < SEA_LEVEL_Z)
-    {
-        waterDepth = SEA_LEVEL_Z - groundZ;
-        return true;
+        float groundZ = 0.0f;
+        if (GetZ(x, y, groundZ, true, false))
+        {
+            if (groundZ < surfaceZ)
+            {
+                waterDepth = surfaceZ - groundZ;
+                return true;
+            }
+            if (std::abs(surfaceZ - SEA_LEVEL_Z) < 0.01f && groundZ <= 0.01f)
+            {
+                waterDepth = 2.0f;
+                return true;
+            }
+        }
     }
 
     waterDepth = 0.0f;
@@ -471,6 +499,7 @@ bool HeightMap::IsUnderwater(float x, float y, float& waterDepth) const
 
 bool HeightMap::GetClearance(float x, float y, float z, float& clearance, bool& isUnderground) const
 {
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
     float groundZ = 0.0f;
     if (!GetZ(x, y, groundZ, true, false))
     {
@@ -509,6 +538,146 @@ int HeightMap::GetZBatch(const float* xArr, const float* yArr, float* zOut, int 
     return processed;
 }
 
+inline int64_t HeightMap::CrossProduct2D(const GridPoint& o, const GridPoint& a, const GridPoint& b)
+{
+    return static_cast<int64_t>(a.x - o.x) * static_cast<int64_t>(b.y - o.y) -
+           static_cast<int64_t>(a.y - o.y) * static_cast<int64_t>(b.x - o.x);
+}
+
+std::vector<HeightMap::GridPoint> HeightMap::ComputeConvexHull(std::vector<GridPoint>& pts)
+{
+    if (pts.size() <= 2)
+    {
+        return pts;
+    }
+
+    std::sort(pts.begin(), pts.end());
+    pts.erase(std::unique(pts.begin(), pts.end()), pts.end());
+
+    if (pts.size() <= 2)
+    {
+        return pts;
+    }
+
+    const size_t n = pts.size();
+    std::vector<GridPoint> lower;
+    lower.reserve(n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        while (lower.size() >= 2 && CrossProduct2D(lower[lower.size() - 2], lower.back(), pts[i]) <= 0)
+        {
+            lower.pop_back();
+        }
+        lower.push_back(pts[i]);
+    }
+
+    std::vector<GridPoint> upper;
+    upper.reserve(n);
+    for (int i = static_cast<int>(n) - 1; i >= 0; --i)
+    {
+        while (upper.size() >= 2 && CrossProduct2D(upper[upper.size() - 2], upper.back(), pts[static_cast<size_t>(i)]) <= 0)
+        {
+            upper.pop_back();
+        }
+        upper.push_back(pts[static_cast<size_t>(i)]);
+    }
+
+    lower.pop_back();
+    upper.pop_back();
+    lower.insert(lower.end(), upper.begin(), upper.end());
+    return lower;
+}
+
+inline bool HeightMap::IsPointInConvexHull(const std::vector<GridPoint>& hull, int x, int y)
+{
+    const size_t n = hull.size();
+    if (n < 3) return false;
+    GridPoint p{ x, y };
+    for (size_t i = 0; i < n; ++i)
+    {
+        size_t j = (i + 1 == n) ? 0 : i + 1;
+        if (CrossProduct2D(hull[i], hull[j], p) < 0)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline float HeightMap::DistanceSqToSegment(float px, float py, float ax, float ay, float bx, float by)
+{
+    const float abx = bx - ax;
+    const float aby = by - ay;
+    const float apx = px - ax;
+    const float apy = py - ay;
+    const float abLenSq = abx * abx + aby * aby;
+    if (abLenSq <= 1e-9f)
+    {
+        return apx * apx + apy * apy;
+    }
+    const float t = std::clamp((apx * abx + apy * aby) / abLenSq, 0.0f, 1.0f);
+    const float projX = ax + t * abx;
+    const float projY = ay + t * aby;
+    const float dx = px - projX;
+    const float dy = py - projY;
+    return dx * dx + dy * dy;
+}
+
+float HeightMap::MinDistanceToHull(const std::vector<GridPoint>& hull, int gx, int gy)
+{
+    if (hull.empty()) return 0.0f;
+    if (hull.size() == 1)
+    {
+        float dx = static_cast<float>(gx - hull[0].x);
+        float dy = static_cast<float>(gy - hull[0].y);
+        return std::sqrt(dx * dx + dy * dy);
+    }
+    if (hull.size() == 2)
+    {
+        return std::sqrt(DistanceSqToSegment(static_cast<float>(gx), static_cast<float>(gy),
+                                             static_cast<float>(hull[0].x), static_cast<float>(hull[0].y),
+                                             static_cast<float>(hull[1].x), static_cast<float>(hull[1].y)));
+    }
+    if (IsPointInConvexHull(hull, gx, gy))
+    {
+        return 0.0f;
+    }
+    float minSq = 1e12f;
+    const size_t n = hull.size();
+    const float px = static_cast<float>(gx);
+    const float py = static_cast<float>(gy);
+    for (size_t i = 0; i < n; ++i)
+    {
+        size_t j = (i + 1 == n) ? 0 : i + 1;
+        float dSq = DistanceSqToSegment(px, py,
+                                        static_cast<float>(hull[i].x), static_cast<float>(hull[i].y),
+                                        static_cast<float>(hull[j].x), static_cast<float>(hull[j].y));
+        if (dSq < minSq)
+        {
+            minSq = dSq;
+        }
+    }
+    return std::sqrt(minSq);
+}
+
+
+bool HeightMap::IsPointInCarvedArea(int gx, int gy) const
+{
+    for (const auto& area : m_carvedAreas)
+    {
+        if (gx >= area.minGx && gx <= area.maxGx &&
+            gy >= area.minGy && gy <= area.maxGy)
+        {
+            if (MinDistanceToHull(area.hull, gx, gy) <= 2.0f)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+
 bool HeightMap::RemoveBuilding(int modelId, float x, float y, float z, float radius)
 {
     if (!m_isLoaded || m_data == nullptr)
@@ -516,149 +685,580 @@ bool HeightMap::RemoveBuilding(int modelId, float x, float y, float z, float rad
         return false;
     }
 
+    // Safety guard: Model ID -1 (SA-MP wildcard for all models) must be ignored
+    if (modelId < 0)
+    {
+        return true;
+    }
+
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) || !std::isfinite(radius))
+    {
+        return false;
+    }
+
+    if (std::abs(x) > 20000.0f || std::abs(y) > 20000.0f || std::abs(z) > 20000.0f || radius < 0.0f)
+    {
+        return false;
+    }
+
     // Safety guard: Global map-wide wipe pattern (e.g. RemoveBuildingForPlayer(playerid, model, 0.0, 0.0, 0.0, 6000.0))
-    // Global wipes are search queries for props/trees/lamps across the state, not a single massive structure.
     if (std::abs(x) < 1.0f && std::abs(y) < 1.0f && radius > 500.0f)
     {
         return true;
     }
 
-    // Deduplication check: hash of modelId and quantized coordinates (run once per unique building location)
+    // Deduplication check: modelId and quantized coordinates
     const int qx = static_cast<int>(std::round(x * 2.0f));
     const int qy = static_cast<int>(std::round(y * 2.0f));
     const int qz = static_cast<int>(std::round(z * 2.0f));
 
-    const uint64_t buildingKey = (static_cast<uint64_t>(modelId & 0xFFFF) << 48) ^
-                                 (static_cast<uint64_t>(static_cast<uint32_t>(qx)) << 32) ^
-                                 (static_cast<uint64_t>(static_cast<uint32_t>(qy)) << 16) ^
-                                 (static_cast<uint64_t>(static_cast<uint32_t>(qz)));
-
-    if (!m_removedBuildings.insert(buildingKey).second)
+    RemovedBuildingKey bKey{ modelId, qx, qy, qz };
+    if (!m_removedBuildings.insert(bKey).second)
     {
         return true; // Already processed in this server session
     }
 
-    // Determine the actual physical footprint of the model (decoupled from SA-MP search radius)
-    float physicalRadius = GetModelPhysicalRadius(modelId);
-    float effectiveRadius = std::clamp(physicalRadius, 4.0f, 60.0f);
-
-    // If the mapper provided a specific local radius between 1.0m and 45.0m, consider it as an upper bound
-    if (radius >= 1.0f && radius < effectiveRadius)
+    // Pre-conditions: discard unknown models or flat props
+    float sx = 0.0f, sy = 0.0f, sz = 0.0f;
+    if (!GetModelCollisionDimensions(modelId, sx, sy, sz))
     {
-        effectiveRadius = radius;
+        return true; // Unknown model: skip
     }
 
-    // Perimeter sampling to fit ground slope (Z = C + A*(x - x0) + B*(y - y0))
-    constexpr int NUM_SAMPLES = 16;
-    const float sampleRadius = effectiveRadius + 2.0f;
+    if (sz < 2.5f || (std::max)(sx, sy) < 2.0f)
+    {
+        return true; // Flat props, small benches, thin poles: skip
+    }
 
-    struct SamplePoint
+    int centerGx = 0, centerGy = 0;
+    if (!WorldToGrid(x, y, centerGx, centerGy))
+    {
+        return false;
+    }
+
+    // Plateau detection (BFS)
+    struct PlateauResult
+    {
+        bool success{ false };
+        bool aborted{ false };
+        bool isRoof{ false };
+        std::vector<GridPoint> cells;
+        std::vector<GridPoint> boundary;
+        int perimeter{ 0 };
+        int drops{ 0 };
+    };
+
+    const float maxDist = (std::min)(120.0f, std::hypot(sx, sy) + 30.0f);
+    constexpr int maxCells = 20000;
+    const float maxDistSq = maxDist * maxDist;
+
+    auto findPlateau = [&](int seedGx, int seedGy) -> PlateauResult
+    {
+        PlateauResult res;
+        if (seedGx < 0 || seedGx >= MAP_GRID_WIDTH || seedGy < 0 || seedGy >= MAP_GRID_HEIGHT)
+        {
+            return res;
+        }
+
+        const int R = static_cast<int>(std::ceil(maxDist)) + 2;
+        const int winMinX = (std::max)(0, seedGx - R);
+        const int winMaxX = (std::min)(MAP_GRID_WIDTH - 1, seedGx + R);
+        const int winMinY = (std::max)(0, seedGy - R);
+        const int winMaxY = (std::min)(MAP_GRID_HEIGHT - 1, seedGy + R);
+        const int winW = winMaxX - winMinX + 1;
+        const int winH = winMaxY - winMinY + 1;
+
+        std::vector<uint8_t> visited(static_cast<size_t>(winW) * static_cast<size_t>(winH), 0);
+        std::vector<uint32_t> queue;
+        queue.reserve(4096);
+
+        auto markVisited = [&](int gx, int gy) {
+            visited[static_cast<size_t>(gy - winMinY) * winW + static_cast<size_t>(gx - winMinX)] = 1;
+        };
+        auto isVisited = [&](int gx, int gy) -> bool {
+            return visited[static_cast<size_t>(gy - winMinY) * winW + static_cast<size_t>(gx - winMinX)] != 0;
+        };
+
+        queue.push_back((static_cast<uint32_t>(seedGx) << 16) | static_cast<uint32_t>(seedGy));
+        markVisited(seedGx, seedGy);
+        res.cells.push_back({ seedGx, seedGy });
+
+        size_t head = 0;
+        while (head < queue.size())
+        {
+            uint32_t packed = queue[head++];
+            int curGx = static_cast<int>(packed >> 16);
+            int curGy = static_cast<int>(packed & 0xFFFF);
+            float curZ = static_cast<float>(m_data[static_cast<size_t>(curGy) * MAP_GRID_WIDTH + static_cast<size_t>(curGx)]) * 0.01f;
+
+            const int dxArr[4] = { 1, -1, 0, 0 };
+            const int dyArr[4] = { 0, 0, 1, -1 };
+
+            for (int i = 0; i < 4; ++i)
+            {
+                int nGx = curGx + dxArr[i];
+                int nGy = curGy + dyArr[i];
+
+                if (nGx < 0 || nGx >= MAP_GRID_WIDTH || nGy < 0 || nGy >= MAP_GRID_HEIGHT)
+                {
+                    continue;
+                }
+
+                float dFromSeedX = static_cast<float>(nGx - seedGx);
+                float dFromSeedY = static_cast<float>(nGy - seedGy);
+                float distFromSeedSq = dFromSeedX * dFromSeedX + dFromSeedY * dFromSeedY;
+
+                float nZ = static_cast<float>(m_data[static_cast<size_t>(nGy) * MAP_GRID_WIDTH + static_cast<size_t>(nGx)]) * 0.01f;
+
+                if (std::abs(nZ - curZ) <= 1.5f)
+                {
+                    if (distFromSeedSq > maxDistSq || res.cells.size() >= static_cast<size_t>(maxCells))
+                    {
+                        res.aborted = true;
+                        return res;
+                    }
+
+                    if (nGx >= winMinX && nGx <= winMaxX && nGy >= winMinY && nGy <= winMaxY)
+                    {
+                        if (!isVisited(nGx, nGy))
+                        {
+                            markVisited(nGx, nGy);
+                            queue.push_back((static_cast<uint32_t>(nGx) << 16) | static_cast<uint32_t>(nGy));
+                            res.cells.push_back({ nGx, nGy });
+                        }
+                    }
+                }
+            }
+        }
+
+        res.boundary.reserve(res.cells.size() / 2);
+        for (const auto& pt : res.cells)
+        {
+            float curZ = static_cast<float>(m_data[static_cast<size_t>(pt.y) * MAP_GRID_WIDTH + static_cast<size_t>(pt.x)]) * 0.01f;
+            bool isBoundaryCell = false;
+
+            const int dxArr[4] = { 1, -1, 0, 0 };
+            const int dyArr[4] = { 0, 0, 1, -1 };
+
+            for (int i = 0; i < 4; ++i)
+            {
+                int nGx = pt.x + dxArr[i];
+                int nGy = pt.y + dyArr[i];
+
+                bool inPlateau = false;
+                if (nGx >= winMinX && nGx <= winMaxX && nGy >= winMinY && nGy <= winMaxY)
+                {
+                    inPlateau = isVisited(nGx, nGy);
+                }
+
+                if (!inPlateau)
+                {
+                    isBoundaryCell = true;
+                    res.perimeter++;
+
+                    if (nGx >= 0 && nGx < MAP_GRID_WIDTH && nGy >= 0 && nGy < MAP_GRID_HEIGHT)
+                    {
+                        float nZ = static_cast<float>(m_data[static_cast<size_t>(nGy) * MAP_GRID_WIDTH + static_cast<size_t>(nGx)]) * 0.01f;
+                        if (curZ - nZ > 2.5f)
+                        {
+                            res.drops++;
+                        }
+                    }
+                }
+            }
+
+            if (isBoundaryCell)
+            {
+                res.boundary.push_back(pt);
+            }
+        }
+
+        res.isRoof = (res.drops >= (std::max)(8, static_cast<int>(0.10f * static_cast<float>(res.perimeter))));
+        res.success = true;
+        return res;
+    };
+
+    std::vector<GridPoint> hull;
+    PlateauResult plateau = findPlateau(centerGx, centerGy);
+    bool roofDetected = (plateau.success && plateau.isRoof);
+
+    if (roofDetected)
+    {
+        hull = ComputeConvexHull(plateau.boundary);
+        if (hull.empty())
+        {
+            roofDetected = false;
+        }
+    }
+
+    if (!roofDetected)
+    {
+        // If the removal point has no rooftop plateau and lies within an already
+        // carved area (e.g. LOD model, secondary prop, glass, or patch already applied),
+        // safely skip Pass 2 search to prevent excavating neighboring structures.
+        if (IsPointInCarvedArea(centerGx, centerGy))
+        {
+            return true;
+        }
+
+        // Pass 2: Search for highest cell in radius rs = clamp(0.5 * hypot(sx, sy), 3, 20) m
+        const float rs = std::clamp(0.5f * std::hypot(sx, sy), 3.0f, 20.0f);
+        const float rsSq = rs * rs;
+        const int searchR = static_cast<int>(std::ceil(rs));
+
+        const float seedZ = static_cast<float>(m_data[static_cast<size_t>(centerGy) * MAP_GRID_WIDTH + static_cast<size_t>(centerGx)]) * 0.01f;
+        float highestZ = seedZ + 2.5f;
+        int bestGx = -1;
+        int bestGy = -1;
+
+        for (int dy = -searchR; dy <= searchR; ++dy)
+        {
+            const int sGy = centerGy + dy;
+            if (sGy < 0 || sGy >= MAP_GRID_HEIGHT) continue;
+            for (int dx = -searchR; dx <= searchR; ++dx)
+            {
+                const int sGx = centerGx + dx;
+                if (sGx < 0 || sGx >= MAP_GRID_WIDTH) continue;
+                if (static_cast<float>(dx * dx + dy * dy) <= rsSq)
+                {
+                    float cz = static_cast<float>(m_data[static_cast<size_t>(sGy) * MAP_GRID_WIDTH + static_cast<size_t>(sGx)]) * 0.01f;
+                    if (cz > highestZ)
+                    {
+                        highestZ = cz;
+                        bestGx = sGx;
+                        bestGy = sGy;
+                    }
+                }
+            }
+        }
+
+        if (bestGx != -1 && bestGy != -1)
+        {
+            PlateauResult pass2 = findPlateau(bestGx, bestGy);
+            if (pass2.success && pass2.isRoof)
+            {
+                // Candidate roof is accepted ONLY if its footprint encloses the removal point
+                std::vector<GridPoint> pass2Hull = ComputeConvexHull(pass2.boundary);
+                if (!pass2Hull.empty() && MinDistanceToHull(pass2Hull, centerGx, centerGy) <= 2.0f)
+                {
+                    plateau = std::move(pass2);
+                    hull = std::move(pass2Hull);
+                    roofDetected = true;
+                }
+                else
+                {
+                    // Candidate roof belongs to an adjacent/neighboring building: abort without altering
+                    return true;
+                }
+            }
+            else if (pass2.aborted)
+            {
+                return true;
+            }
+        }
+        else if (plateau.aborted)
+        {
+            return true;
+        }
+
+        if (!roofDetected)
+        {
+            return true; // Not a roof, do not alter heightmap
+        }
+    }
+
+    // Building footprint mask via convex hull
+    if (hull.empty())
+    {
+        return true;
+    }
+
+    int hullMinGx = hull[0].x, hullMaxGx = hull[0].x;
+    int hullMinGy = hull[0].y, hullMaxGy = hull[0].y;
+    for (const auto& hp : hull)
+    {
+        if (hp.x < hullMinGx) hullMinGx = hp.x;
+        if (hp.x > hullMaxGx) hullMaxGx = hp.x;
+        if (hp.y < hullMinGy) hullMinGy = hp.y;
+        if (hp.y > hullMaxGy) hullMaxGy = hp.y;
+    }
+
+    const int maskMinGx = (std::max)(0, hullMinGx - 2);
+    const int maskMaxGx = (std::min)(MAP_GRID_WIDTH - 1, hullMaxGx + 2);
+    const int maskMinGy = (std::max)(0, hullMinGy - 2);
+    const int maskMaxGy = (std::min)(MAP_GRID_HEIGHT - 1, hullMaxGy + 2);
+
+    const int winMinGx = (std::max)(0, maskMinGx - 6);
+    const int winMaxGx = (std::min)(MAP_GRID_WIDTH - 1, maskMaxGx + 6);
+    const int winMinGy = (std::max)(0, maskMinGy - 6);
+    const int winMaxGy = (std::min)(MAP_GRID_HEIGHT - 1, maskMaxGy + 6);
+
+    struct Sample
     {
         float u;
         float v;
         float z;
     };
-    std::vector<SamplePoint> samples;
-    samples.reserve(NUM_SAMPLES);
+    std::vector<GridPoint> maskCells;
+    maskCells.reserve(static_cast<size_t>(maskMaxGx - maskMinGx + 1) * static_cast<size_t>(maskMaxGy - maskMinGy + 1));
+    std::vector<Sample> primarySamples;
+    std::vector<Sample> bufferSamples;
+    primarySamples.reserve(2048);
+    bufferSamples.reserve(1024);
 
-    for (int i = 0; i < NUM_SAMPLES; ++i)
+    for (int gy = winMinGy; gy <= winMaxGy; ++gy)
     {
-        float angle = i * (2.0f * PI_CONST / static_cast<float>(NUM_SAMPLES));
-        float u = sampleRadius * std::cos(angle);
-        float v = sampleRadius * std::sin(angle);
-        float sx = x + u;
-        float sy = y + v;
-        float sz = 0.0f;
+        const float wy = 3000.0f - static_cast<float>(gy);
+        const float v = wy - y;
 
-        if (GetZ(sx, sy, sz, true, false))
+        for (int gx = winMinGx; gx <= winMaxGx; ++gx)
         {
-            samples.push_back({ u, v, sz });
+            const float dHull = MinDistanceToHull(hull, gx, gy);
+
+            if (dHull <= 2.0f)
+            {
+                // Mask: inside convex hull or within 2m dilation
+                if (gx >= maskMinGx && gx <= maskMaxGx && gy >= maskMinGy && gy <= maskMaxGy)
+                {
+                    maskCells.push_back({ gx, gy });
+                }
+            }
+            else if (dHull <= 8.0f)
+            {
+                // Outside mask, up to 6m from mask
+                const float wx = static_cast<float>(gx - 3000);
+                const float u = wx - x;
+                const float cz = static_cast<float>(m_data[static_cast<size_t>(gy) * MAP_GRID_WIDTH + static_cast<size_t>(gx)]) * 0.01f;
+
+                if (dHull >= 4.0f)
+                {
+                    // Primary sample: 2m to 6m away from mask
+                    primarySamples.push_back({ u, v, cz });
+                }
+                else
+                {
+                    // Buffer sample: 0m to 2m away from mask
+                    bufferSamples.push_back({ u, v, cz });
+                }
+            }
         }
+    }
+
+    if (maskCells.empty())
+    {
+        return true;
+    }
+
+    if (primarySamples.size() < 8)
+    {
+        primarySamples.insert(primarySamples.end(), bufferSamples.begin(), bufferSamples.end());
+    }
+
+    // Surrounding street lower envelope regression
+    // Discard samples with z <= 0.2m (sea) if there are at least 8 samples with z > 0.2m
+    size_t aboveSeaCount = 0;
+    for (const auto& s : primarySamples)
+    {
+        if (s.z > 0.2f) aboveSeaCount++;
+    }
+    if (aboveSeaCount >= 8)
+    {
+        std::vector<Sample> filtered;
+        filtered.reserve(aboveSeaCount);
+        for (const auto& s : primarySamples)
+        {
+            if (s.z > 0.2f) filtered.push_back(s);
+        }
+        primarySamples = std::move(filtered);
     }
 
     float planeA = 0.0f;
     float planeB = 0.0f;
-    float planeC = z;
+    float planeC = 0.0f;
 
-    if (!samples.empty())
+    if (primarySamples.size() >= 8)
     {
-        // Outlier rejection: In dense industrial sites, adjacent structures might still be elevated.
-        // We sort sample heights and retain the lower 60% of samples (the true natural ground).
-        std::vector<SamplePoint> sortedSamples = samples;
-        std::sort(sortedSamples.begin(), sortedSamples.end(), [](const SamplePoint& a, const SamplePoint& b) {
-            return a.z < b.z;
-        });
-
-        size_t keepCount = std::max<size_t>(3, (sortedSamples.size() * 6) / 10);
-        float sumU2 = 0.0f, sumV2 = 0.0f, sumZ = 0.0f, sumUZ = 0.0f, sumVZ = 0.0f;
-
-        for (size_t i = 0; i < keepCount; ++i)
+        std::vector<Sample> curSamples = primarySamples;
+        for (int it = 0; it < 4; ++it)
         {
-            const auto& s = sortedSamples[i];
-            sumU2 += s.u * s.u;
-            sumV2 += s.v * s.v;
-            sumZ += s.z;
-            sumUZ += s.u * s.z;
-            sumVZ += s.v * s.z;
+            if (curSamples.size() < 8) break;
+
+            float sumU = 0.0f, sumV = 0.0f, sumZ = 0.0f;
+            for (const auto& s : curSamples)
+            {
+                sumU += s.u;
+                sumV += s.v;
+                sumZ += s.z;
+            }
+            const float invN = 1.0f / static_cast<float>(curSamples.size());
+            const float meanU = sumU * invN;
+            const float meanV = sumV * invN;
+            const float meanZ = sumZ * invN;
+
+            float varU = 0.0f, varV = 0.0f, covUZ = 0.0f, covVZ = 0.0f;
+            for (const auto& s : curSamples)
+            {
+                const float du = s.u - meanU;
+                const float dv = s.v - meanV;
+                const float dz = s.z - meanZ;
+                varU += du * du;
+                varV += dv * dv;
+                covUZ += du * dz;
+                covVZ += dv * dz;
+            }
+
+            float a = (varU > 1e-4f) ? (covUZ / varU) : 0.0f;
+            float b = (varV > 1e-4f) ? (covVZ / varV) : 0.0f;
+            a = std::clamp(a, -0.30f, 0.30f);
+            b = std::clamp(b, -0.30f, 0.30f);
+            float c = meanZ - a * meanU - b * meanV;
+
+            planeA = a;
+            planeB = b;
+            planeC = c;
+
+            std::vector<Sample> nextSamples;
+            nextSamples.reserve(curSamples.size());
+            for (const auto& s : curSamples)
+            {
+                float planeZ = planeC + planeA * s.u + planeB * s.v;
+                if (s.z <= planeZ + 1.0f)
+                {
+                    nextSamples.push_back(s);
+                }
+            }
+
+            if (nextSamples.size() == curSamples.size() || nextSamples.size() < 8)
+            {
+                break;
+            }
+            curSamples = std::move(nextSamples);
         }
-
-        const float n = static_cast<float>(keepCount);
-        planeC = sumZ / n;
-
-        if (sumU2 > 0.001f)
+    }
+    else if (!primarySamples.empty())
+    {
+        // Fallback: 10th percentile of heights as horizontal plane
+        std::vector<float> zVals;
+        zVals.reserve(primarySamples.size());
+        for (const auto& s : primarySamples)
         {
-            planeA = sumUZ / sumU2;
+            zVals.push_back(s.z);
         }
-        if (sumV2 > 0.001f)
+        std::sort(zVals.begin(), zVals.end());
+        size_t p10Index = static_cast<size_t>(0.10f * static_cast<float>(zVals.size()));
+        if (p10Index >= zVals.size()) p10Index = 0;
+        planeA = 0.0f;
+        planeB = 0.0f;
+        planeC = zVals[p10Index];
+    }
+    else
+    {
+        return true; // No samples available, do not alter heightmap
+    }
+
+    // Carve mask cells to street plane
+    for (const auto& pt : maskCells)
+    {
+        const float wx = static_cast<float>(pt.x - 3000);
+        const float wy = 3000.0f - static_cast<float>(pt.y);
+        const float u = wx - x;
+        const float v = wy - y;
+
+        const float newZ = planeC + planeA * u + planeB * v;
+        const size_t cellIndex = static_cast<size_t>(pt.y) * MAP_GRID_WIDTH + static_cast<size_t>(pt.x);
+        const float currentZ = static_cast<float>(m_data[cellIndex]) * 0.01f;
+
+        // Golden Rule: Only lower height, never raise
+        if (newZ < currentZ)
         {
-            planeB = sumVZ / sumV2;
+            uint16_t encodedZ = static_cast<uint16_t>(std::clamp(newZ * 100.0f, 0.0f, 65535.0f));
+            m_data[cellIndex] = encodedZ;
+            MarkCellDirty(cellIndex);
         }
     }
 
-    // Bounding grid range for rasterization
-    int minGx = 0, maxGx = 0, minGy = 0, maxGy = 0;
-    WorldToGrid(x - effectiveRadius, y - effectiveRadius, minGx, minGy);
-    WorldToGrid(x + effectiveRadius, y + effectiveRadius, maxGx, maxGy);
+    // Register carved area with exact convex hull footprint and bounding box
+    m_carvedAreas.push_back({ hull, maskMinGx, maskMinGy, maskMaxGx, maskMaxGy });
 
-    minGx = std::clamp(minGx, 0, MAP_GRID_WIDTH - 1);
-    maxGx = std::clamp(maxGx, 0, MAP_GRID_WIDTH - 1);
-    minGy = std::clamp(minGy, 0, MAP_GRID_HEIGHT - 1);
-    maxGy = std::clamp(maxGy, 0, MAP_GRID_HEIGHT - 1);
-
-    const float radiusSq = effectiveRadius * effectiveRadius;
-
-    for (int gy = minGy; gy <= maxGy; ++gy)
+    // Reapply stamped objects overlapping mask
+    for (const auto& obj : m_appliedObjects)
     {
-        for (int gx = minGx; gx <= maxGx; ++gx)
+        int ogx = 0, ogy = 0;
+        WorldToGrid(obj.x, obj.y, ogx, ogy);
+        const float objRadius = GetModelPhysicalRadius(obj.modelId);
+        const int objMargin = static_cast<int>(std::ceil(objRadius));
+        if (ogx + objMargin >= maskMinGx && ogx - objMargin <= maskMaxGx &&
+            ogy + objMargin >= maskMinGy && ogy - objMargin <= maskMaxGy)
         {
-            float wx = static_cast<float>(gx - 3000);
-            float wy = static_cast<float>(gy - 3000);
-
-            float du = wx - x;
-            float dv = wy - y;
-
-            if ((du * du + dv * dv) <= radiusSq)
-            {
-                float newZ = planeC + planeA * du + planeB * dv;
-                size_t cellIndex = static_cast<size_t>(gy) * MAP_GRID_WIDTH + static_cast<size_t>(gx);
-                float currentZ = static_cast<float>(m_data[cellIndex]) * 0.01f;
-
-                // Golden Rule: Removal can only LOWER the elevation (carve/flatten), never raise to a roof
-                if (newZ < currentZ)
-                {
-                    uint16_t encodedZ = static_cast<uint16_t>(std::clamp(newZ * 100.0f, 0.0f, 65535.0f));
-                    m_data[cellIndex] = encodedZ;
-                    m_modifiedCells[cellIndex] = encodedZ;
-                }
-            }
+            RasterizeObject(obj.modelId, obj.x, obj.y, obj.z, obj.rx, obj.ry, obj.rz,
+                            obj.forceReplace, obj.customSizeX, obj.customSizeY, obj.customSizeZ);
         }
     }
 
     return true;
 }
 
+
 bool HeightMap::ApplyObject(int modelId, float x, float y, float z, float rx, float ry, float rz,
                             bool forceReplace, float customSizeX, float customSizeY, float customSizeZ)
+{
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) ||
+        !std::isfinite(rx) || !std::isfinite(ry) || !std::isfinite(rz))
+    {
+        return false;
+    }
+    if (std::abs(x) > 20000.0f || std::abs(y) > 20000.0f || std::abs(z) > 20000.0f)
+    {
+        return false;
+    }
+    if (!m_isLoaded || m_data == nullptr)
+    {
+        return false;
+    }
+
+    // Validate custom dimensions
+    if (customSizeX > 0.0f || customSizeY > 0.0f || customSizeZ > 0.0f)
+    {
+        if (!std::isfinite(customSizeX) || !std::isfinite(customSizeY) || !std::isfinite(customSizeZ) ||
+            customSizeX <= 0.0f || customSizeY <= 0.0f || customSizeZ <= 0.0f ||
+            customSizeX > 300.0f || customSizeY > 300.0f || customSizeZ > 300.0f)
+        {
+            return false;
+        }
+    }
+    else
+    {
+        float dummyX = 0.0f, dummyY = 0.0f, dummyZ = 0.0f;
+        if (!GetModelCollisionDimensions(modelId, dummyX, dummyY, dummyZ))
+        {
+            return false; // Unknown model without dimensions
+        }
+    }
+
+    // Deduplicate applied objects
+    AppliedObjectKey aKey{
+        modelId,
+        static_cast<int>(std::round(x * 2.0f)),
+        static_cast<int>(std::round(y * 2.0f)),
+        static_cast<int>(std::round(z * 2.0f)),
+        static_cast<int>(std::round(rx)),
+        static_cast<int>(std::round(ry)),
+        static_cast<int>(std::round(rz))
+    };
+    if (!m_appliedObjectKeys.insert(aKey).second)
+    {
+        return true; // Already applied
+    }
+
+    m_appliedObjects.push_back({
+        modelId, x, y, z, rx, ry, rz, forceReplace, customSizeX, customSizeY, customSizeZ
+    });
+
+    return RasterizeObject(modelId, x, y, z, rx, ry, rz, forceReplace, customSizeX, customSizeY, customSizeZ);
+}
+
+bool HeightMap::RasterizeObject(int modelId, float x, float y, float z, float rx, float ry, float rz,
+                                bool forceReplace, float customSizeX, float customSizeY, float customSizeZ)
 {
     if (!m_isLoaded || m_data == nullptr)
     {
@@ -758,15 +1358,25 @@ bool HeightMap::ApplyObject(int modelId, float x, float y, float z, float rx, fl
     // Plane constant D = -(N . P0)
     float planeD = -(normal.x * worldCorners[0].x + normal.y * worldCorners[0].y + normal.z * worldCorners[0].z);
 
-    // Rasterization grid bounds
-    int minGx = 0, maxGx = 0, minGy = 0, maxGy = 0;
-    WorldToGrid(minX, minY, minGx, minGy);
-    WorldToGrid(maxX, maxY, maxGx, maxGy);
+    // Rasterization grid bounds with strict map boundary clamping
+    if (maxX < MAP_MIN_X || minX > MAP_MAX_X || maxY < MAP_MIN_Y || minY > MAP_MAX_Y)
+    {
+        return false; // Entirely outside the world map
+    }
 
-    minGx = std::clamp(minGx, 0, MAP_GRID_WIDTH - 1);
-    maxGx = std::clamp(maxGx, 0, MAP_GRID_WIDTH - 1);
-    minGy = std::clamp(minGy, 0, MAP_GRID_HEIGHT - 1);
-    maxGy = std::clamp(maxGy, 0, MAP_GRID_HEIGHT - 1);
+    float cMinX = std::clamp(minX, MAP_MIN_X, MAP_MAX_X);
+    float cMaxX = std::clamp(maxX, MAP_MIN_X, MAP_MAX_X);
+    float cMinY = std::clamp(minY, MAP_MIN_Y, MAP_MAX_Y);
+    float cMaxY = std::clamp(maxY, MAP_MIN_Y, MAP_MAX_Y);
+
+    int gx1 = 0, gy1 = 0, gx2 = 0, gy2 = 0;
+    WorldToGrid(cMinX, cMinY, gx1, gy1);
+    WorldToGrid(cMaxX, cMaxY, gx2, gy2);
+
+    int minGx = std::clamp((std::min)(gx1, gx2), 0, MAP_GRID_WIDTH - 1);
+    int maxGx = std::clamp((std::max)(gx1, gx2), 0, MAP_GRID_WIDTH - 1);
+    int minGy = std::clamp((std::min)(gy1, gy2), 0, MAP_GRID_HEIGHT - 1);
+    int maxGy = std::clamp((std::max)(gy1, gy2), 0, MAP_GRID_HEIGHT - 1);
 
     // Determine polygon 2D winding order
     bool invertedWinding = false;
@@ -801,10 +1411,11 @@ bool HeightMap::ApplyObject(int modelId, float x, float y, float z, float rx, fl
 
     for (int gy = minGy; gy <= maxGy; ++gy)
     {
+        const float wy = 3000.0f - static_cast<float>(gy);
+
         for (int gx = minGx; gx <= maxGx; ++gx)
         {
-            float wx = static_cast<float>(gx - 3000);
-            float wy = static_cast<float>(gy - 3000);
+            const float wx = static_cast<float>(gx - 3000);
 
             if (isInsideQuad(wx, wy))
             {
@@ -818,7 +1429,7 @@ bool HeightMap::ApplyObject(int modelId, float x, float y, float z, float rx, fl
                 {
                     uint16_t encodedZ = static_cast<uint16_t>(std::clamp(surfZ * 100.0f, 0.0f, 65535.0f));
                     m_data[cellIndex] = encodedZ;
-                    m_modifiedCells[cellIndex] = encodedZ;
+                    MarkCellDirty(cellIndex);
                 }
             }
         }
@@ -829,6 +1440,7 @@ bool HeightMap::ApplyObject(int modelId, float x, float y, float z, float rx, fl
 
 bool HeightMap::IsSafeForSpawn(float x, float y, float maxSlope) const
 {
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(maxSlope)) return false;
     if (!m_isLoaded || m_data == nullptr) return false;
     if (x < MAP_MIN_X || x > MAP_MAX_X || y < MAP_MIN_Y || y > MAP_MAX_Y) return false;
 
@@ -850,6 +1462,7 @@ bool HeightMap::IsSafeForSpawn(float x, float y, float maxSlope) const
 bool HeightMap::GetSafeSpawn(float searchX, float searchY, float& safeX, float& safeY, float& safeZ,
                              float maxSlope, float searchRadius) const
 {
+    if (!std::isfinite(searchX) || !std::isfinite(searchY) || !std::isfinite(maxSlope) || !std::isfinite(searchRadius)) return false;
     if (!m_isLoaded || m_data == nullptr) return false;
 
     if (IsSafeForSpawn(searchX, searchY, maxSlope))
@@ -887,6 +1500,7 @@ bool HeightMap::GetSafeSpawn(float searchX, float searchY, float& safeX, float& 
 
 bool HeightMap::GetImpactTime(float x, float y, float z, float vz, float& secondsToImpact, float& impactZ, float gravity) const
 {
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) || !std::isfinite(vz) || !std::isfinite(gravity)) return false;
     if (!m_isLoaded || m_data == nullptr) return false;
 
     float groundZ = 0.0f;
@@ -937,6 +1551,7 @@ bool HeightMap::GetImpactTime(float x, float y, float z, float vz, float& second
 
 bool HeightMap::IsPointInRadarShadow(float radarX, float radarY, float radarZ, float targetX, float targetY, float targetZ) const
 {
+    if (!std::isfinite(radarX) || !std::isfinite(radarY) || !std::isfinite(radarZ) || !std::isfinite(targetX) || !std::isfinite(targetY) || !std::isfinite(targetZ)) return false;
     if (!m_isLoaded || m_data == nullptr) return false;
 
     float hitX = 0.0f, hitY = 0.0f, hitZ = 0.0f;
@@ -946,6 +1561,7 @@ bool HeightMap::IsPointInRadarShadow(float radarX, float radarY, float radarZ, f
 bool HeightMap::GetAreaElevationStats(float minX, float minY, float maxX, float maxY,
                                      float& minZ, float& maxZ, float& avgZ, float& maxSlopeDeg) const
 {
+    if (!std::isfinite(minX) || !std::isfinite(minY) || !std::isfinite(maxX) || !std::isfinite(maxY)) return false;
     if (!m_isLoaded || m_data == nullptr) return false;
 
     if (minX > maxX) std::swap(minX, maxX);
@@ -956,11 +1572,16 @@ bool HeightMap::GetAreaElevationStats(float minX, float minY, float maxX, float 
     minY = (std::max)(MAP_MIN_Y, minY);
     maxY = (std::min)(MAP_MAX_Y, maxY);
 
-    int minGx = 0, maxGx = 0, minGy = 0, maxGy = 0;
-    if (!WorldToGrid(minX, minY, minGx, minGy) || !WorldToGrid(maxX, maxY, maxGx, maxGy))
+    int gx1 = 0, gy1 = 0, gx2 = 0, gy2 = 0;
+    if (!WorldToGrid(minX, minY, gx1, gy1) || !WorldToGrid(maxX, maxY, gx2, gy2))
     {
         return false;
     }
+
+    int minGx = (std::min)(gx1, gx2);
+    int maxGx = (std::max)(gx1, gx2);
+    int minGy = (std::min)(gy1, gy2);
+    int maxGy = (std::max)(gy1, gy2);
 
     int spanX = maxGx - minGx + 1;
     int spanY = maxGy - minGy + 1;
@@ -1009,63 +1630,268 @@ bool HeightMap::GetAreaElevationStats(float minX, float minY, float maxX, float 
     return true;
 }
 
+bool HeightMap::GetGroundZPosArea(float minX, float minY, float maxX, float maxY,
+                                  float& avgZ, float& maxZ, float& minZ, bool waterSurface) const
+{
+    if (!std::isfinite(minX) || !std::isfinite(minY) || !std::isfinite(maxX) || !std::isfinite(maxY)) return false;
+    if (!m_isLoaded || m_data == nullptr) return false;
+
+    if (minX > maxX) std::swap(minX, maxX);
+    if (minY > maxY) std::swap(minY, maxY);
+
+    minX = (std::max)(MAP_MIN_X, minX);
+    maxX = (std::min)(MAP_MAX_X, maxX);
+    minY = (std::max)(MAP_MIN_Y, minY);
+    maxY = (std::min)(MAP_MAX_Y, maxY);
+
+    int gx1 = 0, gy1 = 0, gx2 = 0, gy2 = 0;
+    if (!WorldToGrid(minX, minY, gx1, gy1) || !WorldToGrid(maxX, maxY, gx2, gy2))
+    {
+        return false;
+    }
+
+    int minGx = (std::min)(gx1, gx2);
+    int maxGx = (std::max)(gx1, gx2);
+    int minGy = (std::min)(gy1, gy2);
+    int maxGy = (std::max)(gy1, gy2);
+
+    int spanX = maxGx - minGx + 1;
+    int spanY = maxGy - minGy + 1;
+    if (spanX <= 0 || spanY <= 0) return false;
+
+    int stepX = (std::max)(1, spanX / 50);
+    int stepY = (std::max)(1, spanY / 50);
+
+    float curMinZ = 99999.0f;
+    float curMaxZ = -99999.0f;
+    float sumZ = 0.0f;
+    int sampleCount = 0;
+
+    for (int gy = minGy; gy <= maxGy; gy += stepY)
+    {
+        for (int gx = minGx; gx <= maxGx; gx += stepX)
+        {
+            float z = ReadHeightRaw(gx, gy);
+            if (waterSurface && z < SEA_LEVEL_Z)
+            {
+                z = SEA_LEVEL_Z;
+            }
+            curMinZ = (std::min)(curMinZ, z);
+            curMaxZ = (std::max)(curMaxZ, z);
+            sumZ += z;
+            sampleCount++;
+        }
+    }
+
+    if (sampleCount == 0) return false;
+
+    avgZ = sumZ / static_cast<float>(sampleCount);
+    maxZ = curMaxZ;
+    minZ = curMinZ;
+    return true;
+}
+
+bool HeightMap::GetGroundZPosRadius(float centerX, float centerY, float radius,
+                                    float& avgZ, float& maxZ, float& minZ, bool waterSurface) const
+{
+    if (!std::isfinite(centerX) || !std::isfinite(centerY) || !std::isfinite(radius)) return false;
+    if (!m_isLoaded || m_data == nullptr || radius <= 0.0f) return false;
+
+    float minX = (std::max)(MAP_MIN_X, centerX - radius);
+    float maxX = (std::min)(MAP_MAX_X, centerX + radius);
+    float minY = (std::max)(MAP_MIN_Y, centerY - radius);
+    float maxY = (std::min)(MAP_MAX_Y, centerY + radius);
+
+    int gx1 = 0, gy1 = 0, gx2 = 0, gy2 = 0;
+    if (!WorldToGrid(minX, minY, gx1, gy1) || !WorldToGrid(maxX, maxY, gx2, gy2))
+    {
+        return false;
+    }
+
+    int minGx = (std::min)(gx1, gx2);
+    int maxGx = (std::max)(gx1, gx2);
+    int minGy = (std::min)(gy1, gy2);
+    int maxGy = (std::max)(gy1, gy2);
+
+    int spanX = maxGx - minGx + 1;
+    int spanY = maxGy - minGy + 1;
+    if (spanX <= 0 || spanY <= 0) return false;
+
+    int stepX = (std::max)(1, spanX / 50);
+    int stepY = (std::max)(1, spanY / 50);
+
+    const float radiusSq = radius * radius;
+    float curMinZ = 99999.0f;
+    float curMaxZ = -99999.0f;
+    float sumZ = 0.0f;
+    int sampleCount = 0;
+
+    for (int gy = minGy; gy <= maxGy; gy += stepY)
+    {
+        const float worldY = 3000.0f - static_cast<float>(gy);
+        const float dy = worldY - centerY;
+        const float dySq = dy * dy;
+
+        for (int gx = minGx; gx <= maxGx; gx += stepX)
+        {
+            const float worldX = static_cast<float>(gx) - 3000.0f;
+            const float dx = worldX - centerX;
+
+            if ((dx * dx + dySq) <= radiusSq)
+            {
+                float z = ReadHeightRaw(gx, gy);
+                if (waterSurface && z < SEA_LEVEL_Z)
+                {
+                    z = SEA_LEVEL_Z;
+                }
+                curMinZ = (std::min)(curMinZ, z);
+                curMaxZ = (std::max)(curMaxZ, z);
+                sumZ += z;
+                sampleCount++;
+            }
+        }
+    }
+
+    if (sampleCount == 0)
+    {
+        float centerZ = 0.0f;
+        if (GetZ(centerX, centerY, centerZ, true, waterSurface))
+        {
+            avgZ = centerZ;
+            maxZ = centerZ;
+            minZ = centerZ;
+            return true;
+        }
+        return false;
+    }
+
+    avgZ = sumZ / static_cast<float>(sampleCount);
+    maxZ = curMaxZ;
+    minZ = curMinZ;
+    return true;
+}
+
 constexpr uint32_t GPATCH_MAGIC = 0x43545047; // 'G','P','T','C'
 constexpr uint32_t GPATCH_VERSION = 1;
 
 bool HeightMap::SavePatches(const std::string& filename) const
 {
-    if (!m_isLoaded || m_data == nullptr) return false;
+    if (!m_isLoaded || m_data == nullptr || m_dirtyCells.empty()) return false;
 
-    std::ofstream out(filename, std::ios::binary);
+    // Count modified cells from bitset using popcount
+    uint32_t count = 0;
+    for (uint64_t word : m_dirtyCells)
+    {
+        if (word != 0)
+        {
+            count += static_cast<uint32_t>(std::bitset<64>(word).count());
+        }
+    }
+
+    const std::string tmpFilename = filename + ".tmp";
+    std::ofstream out(tmpFilename, std::ios::binary);
     if (!out.is_open()) return false;
 
     out.write(reinterpret_cast<const char*>(&GPATCH_MAGIC), sizeof(GPATCH_MAGIC));
     out.write(reinterpret_cast<const char*>(&GPATCH_VERSION), sizeof(GPATCH_VERSION));
-
-    const uint32_t count = static_cast<uint32_t>(m_modifiedCells.size());
     out.write(reinterpret_cast<const char*>(&count), sizeof(count));
 
-    for (const auto& kv : m_modifiedCells)
+    for (size_t wordIdx = 0; wordIdx < m_dirtyCells.size(); ++wordIdx)
     {
-        uint32_t cellIndex = static_cast<uint32_t>(kv.first);
-        uint16_t encodedZ = kv.second;
-        out.write(reinterpret_cast<const char*>(&cellIndex), sizeof(cellIndex));
-        out.write(reinterpret_cast<const char*>(&encodedZ), sizeof(encodedZ));
+        uint64_t word = m_dirtyCells[wordIdx];
+        if (word != 0)
+        {
+            for (size_t bit = 0; bit < 64; ++bit)
+            {
+                if (word & (1ULL << bit))
+                {
+                    uint32_t cellIndex = static_cast<uint32_t>((wordIdx << 6) + bit);
+                    if (cellIndex < MAP_TOTAL_CELLS)
+                    {
+                        uint16_t encodedZ = m_data[cellIndex];
+                        out.write(reinterpret_cast<const char*>(&cellIndex), sizeof(cellIndex));
+                        out.write(reinterpret_cast<const char*>(&encodedZ), sizeof(encodedZ));
+                    }
+                }
+            }
+        }
     }
+
+    out.flush();
+    if (!out.good())
+    {
+        out.close();
+        std::remove(tmpFilename.c_str());
+        return false;
+    }
+    out.close();
+
+    // Atomic replace
+#if defined(_WIN32) || defined(WIN32)
+    if (!MoveFileExA(tmpFilename.c_str(), filename.c_str(), MOVEFILE_REPLACE_EXISTING))
+    {
+        std::remove(tmpFilename.c_str());
+        return false;
+    }
+#else
+    if (rename(tmpFilename.c_str(), filename.c_str()) != 0)
+    {
+        std::remove(tmpFilename.c_str());
+        return false;
+    }
+#endif
 
     return true;
 }
 
 bool HeightMap::LoadPatches(const std::string& filename)
 {
-    if (!m_isLoaded || m_data == nullptr) return false;
+    if (!m_isLoaded || m_data == nullptr || m_dirtyCells.empty()) return false;
 
     std::ifstream in(filename, std::ios::binary);
     if (!in.is_open()) return false;
 
+    in.seekg(0, std::ios::end);
+    std::streampos fileSize = in.tellg();
+    in.seekg(0, std::ios::beg);
+
+    if (fileSize < 12) return false;
+
     uint32_t magic = 0;
     in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
-    if (magic != GPATCH_MAGIC) return false;
+    if (!in.good() || magic != GPATCH_MAGIC) return false;
 
     uint32_t version = 0;
     in.read(reinterpret_cast<char*>(&version), sizeof(version));
-    if (version != GPATCH_VERSION) return false;
+    if (!in.good() || version != GPATCH_VERSION) return false;
 
     uint32_t count = 0;
     in.read(reinterpret_cast<char*>(&count), sizeof(count));
+    if (!in.good() || count > MAP_TOTAL_CELLS) return false;
 
+    const uint64_t expectedSize = 12ULL + static_cast<uint64_t>(count) * 6ULL;
+    if (static_cast<uint64_t>(fileSize) != expectedSize) return false;
+
+    struct PatchEntry
+    {
+        uint32_t cellIndex;
+        uint16_t encodedZ;
+    };
+
+    std::vector<PatchEntry> entries(count);
     for (uint32_t i = 0; i < count; ++i)
     {
-        uint32_t cellIndex = 0;
-        uint16_t encodedZ = 0;
-        in.read(reinterpret_cast<char*>(&cellIndex), sizeof(cellIndex));
-        in.read(reinterpret_cast<char*>(&encodedZ), sizeof(encodedZ));
+        in.read(reinterpret_cast<char*>(&entries[i].cellIndex), sizeof(uint32_t));
+        in.read(reinterpret_cast<char*>(&entries[i].encodedZ), sizeof(uint16_t));
+        if (!in.good()) return false;
+        if (entries[i].cellIndex >= MAP_TOTAL_CELLS) return false;
+    }
 
-        if (cellIndex < MAP_TOTAL_CELLS)
-        {
-            m_data[cellIndex] = encodedZ;
-            m_modifiedCells[cellIndex] = encodedZ;
-        }
+    // Apply only after complete validation
+    for (const auto& e : entries)
+    {
+        m_data[e.cellIndex] = e.encodedZ;
+        MarkCellDirty(e.cellIndex);
     }
 
     return true;

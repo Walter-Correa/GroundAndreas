@@ -1,9 +1,20 @@
-cmake_minimum_required(VERSION 3.5...3.28)
-set(CMAKE_POLICY_VERSION_MINIMUM "3.5" CACHE STRING "Minimum policy version" FORCE)
-project(GroundAndreas VERSION 1.0.0 LANGUAGES C CXX)
+cmake_minimum_required(VERSION 3.15...3.28)
+if(POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW)
+endif()
+project(GroundAndreas VERSION 1.1.0 LANGUAGES C CXX)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(CMAKE_CXX_STANDARD 17)
+
+# Static MSVC runtime for all configurations before any add_library (T5)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.in
+  ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h
+)
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/generated)
 
 if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
@@ -72,6 +83,7 @@ set(GROUNDANDREAS_COMMON_SOURCES
   src/heightmap.cpp
   src/natives.cpp
   src/water.cpp
+  src/object_database.cpp
   lib/sdk/amxplugin.cpp
   lib/sdk/amxplugin2.cpp
 )
@@ -86,13 +98,13 @@ add_library(GroundAndreas MODULE ${GROUNDANDREAS_PLUGIN_SOURCES})
 
 set_target_properties(GroundAndreas PROPERTIES PREFIX "")
 set_target_properties(GroundAndreas PROPERTIES OUTPUT_NAME "GroundAndreas")
-if(MSVC)
-  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-elseif(MINGW)
+if(MINGW)
   set_target_properties(GroundAndreas PROPERTIES LINK_FLAGS "-static")
 endif()
 if(UNIX)
   target_link_libraries(GroundAndreas PRIVATE pthread rt)
+  target_link_options(GroundAndreas PRIVATE -static-libstdc++ -static-libgcc)
+  set_property(TARGET GroundAndreas APPEND_STRING PROPERTY COMPILE_FLAGS " -fvisibility=hidden")
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
@@ -109,6 +121,8 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/open.mp-sdk/CMakeLists.txt")
     target_link_libraries(GroundAndreas-Component PRIVATE ws2_32)
   else()
     target_link_libraries(GroundAndreas-Component PRIVATE pthread rt)
+    target_link_options(GroundAndreas-Component PRIVATE -static-libstdc++ -static-libgcc)
+    set_property(TARGET GroundAndreas-Component APPEND_STRING PROPERTY COMPILE_FLAGS " -fvisibility=hidden")
   endif()
   set_target_properties(GroundAndreas-Component PROPERTIES PREFIX "")
   set_target_properties(GroundAndreas-Component PROPERTIES OUTPUT_NAME "GroundAndreas")
@@ -116,8 +130,5 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/open.mp-sdk/CMakeLists.txt")
   set_target_properties(GroundAndreas-Component PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/components")
   if(MINGW)
     set_target_properties(GroundAndreas-Component PROPERTIES LINK_FLAGS "-static")
-  endif()
-  if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
-    set_property(TARGET GroundAndreas-Component APPEND_STRING PROPERTY COMPILE_FLAGS " -Wall")
   endif()
 endif()

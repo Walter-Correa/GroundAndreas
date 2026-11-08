@@ -29,7 +29,7 @@ Given normalized fractional coordinates $u = x - x_0$ and $v = y - y_0 \in [0.0,
 
 $$Z(u, v) = (1 - u)(1 - v) Z_{00} + u(1 - v) Z_{10} + (1 - u) v Z_{01} + u v Z_{11}$$
 
-This produces a continuous, differentiable surface with **sub-millimeter vertical accuracy** ($< 0.001\text{m}$).
+This produces a continuous, differentiable surface via **continuous bilinear interpolation over a 1 m grid with 1 cm vertical resolution**.
 
 ---
 
@@ -46,20 +46,15 @@ native GetGroundZPos(Float:x, Float:y, &Float:z, bool:interpolate = true, bool:w
 * **`interpolate`:**
   * `true` (Default): Smooth bilinear interpolation across the 4 neighboring grid vertices.
   * `false`: Discrete 1m integer grid value (maximum raw read speed).
-* **`water_surface`:**
-  * `true` (Default): Clamps oceans and sea basins to sea level ($Z = 0.0\text{m}$).
-  * `false`: Returns the raw seabed / underwater floor altitude.
+* **`water_surface`:** Kept for API compatibility. Because the heightmap stores unsigned uint16 elevations (range $0.0\text{m}$ to $655.35\text{m}$), ocean cells always evaluate to $0.0\text{m}$.
 * **Returns:** `1` on success, `0` if coordinates are outside world boundaries.
 
 #### Practical Usage Example
 ```pawn
-new Float:zFloor, Float:zBed;
+new Float:zFloor;
 
-// Query sea surface elevation (returns 0.0 in the ocean)
+// Query ground elevation (returns terrain Z on land, 0.0 in the ocean)
 GetGroundZPos(360.0, -2090.0, zFloor, true, true);
-
-// Query ocean floor elevation (returns e.g. -18.45 in the ocean basin)
-GetGroundZPos(360.0, -2090.0, zBed, true, false);
 
 printf("Water depth at coordinates: %.2f meters", zFloor - zBed);
 ```
@@ -69,7 +64,7 @@ printf("Water depth at coordinates: %.2f meters", zFloor - zBed);
 ### `GetGroundZPosBatch`
 
 ```pawn
-native GetGroundZPosBatch(const Float:points_x[], const Float:points_y[], Float:out_z[], total_points, bool:interpolate = true);
+native GetGroundZPosBatch(const Float:points_x[], const Float:points_y[], Float:out_z[], total_points, bool:interpolate = true, bool:water_surface = true);
 ```
 
 When querying hundreds or thousands of coordinates simultaneously (e.g., bot navigation meshes, terrain radar scans, or vehicle convoy pathing), calling a native in a Pawn loop incurs AMX context-switch overhead.
@@ -92,6 +87,92 @@ for (new i = 0; i < SCAN_POINTS; i++)
 
 // Process all 1,000 points in < 1.5ms
 new processed = GetGroundZPosBatch(scanX, scanY, scanZ, SCAN_POINTS, true);
+```
+
+---
+
+### `GetGroundZPosArea`
+
+```pawn
+native bool:GetGroundZPosArea(
+    Float:minx, Float:miny, Float:maxx, Float:maxy,
+    &Float:avg_z,
+    &Float:max_z = 0.0,
+    &Float:min_z = 0.0,
+    bool:water_surface = true
+);
+```
+
+Queries regional ground elevation metrics across a rectangular zone $[X_{\min}, Y_{\min}] 	imes [X_{\max}, Y_{\max}]$ (e.g., gang territories, dispute zones, procedural air-drop squares).
+
+* **`minx`, `miny`, `maxx`, `maxy`:** Bounding box world coordinates in meters. The engine automatically normalizes inverted bounds ($X_{\min} > X_{\max}$).
+* **`&avg_z`:** Mean ground elevation across all sampled grid cells in the zone.
+* **`&max_z`:** Highest terrain elevation inside the zone (mountain crest or building roof).
+* **`&min_z`:** Lowest terrain elevation inside the zone.
+* **`water_surface`:** Kept for API compatibility; ocean cells evaluate to $0.0\text{m}$.
+* **Returns:** `true` on success; `false` if the area lies completely outside world bounds $[-3000, +3000]$ or the heightmap is not loaded.
+
+#### Gangzone Territory Pickup Positioning Example
+```pawn
+stock CreateTerritoryDisputePickup(Float:minx, Float:miny, Float:maxx, Float:maxy)
+{
+    new Float:centerX = (minx + maxx) / 2.0;
+    new Float:centerY = (miny + maxy) / 2.0;
+    new Float:avgZ, Float:maxZ, Float:minZ;
+
+    // Discover the elevation profile of the entire gangzone
+    if (GetGroundZPosArea(minx, miny, maxx, maxy, avgZ, maxZ, minZ))
+    {
+        // Place central dispute pickup 1.0m above the highest terrain feature
+        // to guarantee full visibility from anywhere in the territory
+        return CreateDynamicPickup(1240, 1, centerX, centerY, maxZ + 1.0);
+    }
+    return -1;
+}
+```
+
+---
+
+### `GetGroundZPosRadius`
+
+```pawn
+native bool:GetGroundZPosRadius(
+    Float:x, Float:y, Float:radius,
+    &Float:avg_z,
+    &Float:max_z = 0.0,
+    &Float:min_z = 0.0,
+    bool:water_surface = true
+);
+```
+
+Queries circular radial ground elevation metrics across a circle of radius $R$ centered at $(x, y)$.
+
+* **`x`, `y`:** Center point world coordinates.
+* **`radius`:** Radius in meters ($R > 0.0$).
+* **`&avg_z`:** Mean ground elevation across all grid nodes within the circular radius ($dx^2 + dy^2 \le R^2$).
+* **`&max_z`:** Highest terrain elevation inside the circle.
+* **`&min_z`:** Lowest terrain elevation inside the circle.
+* **`water_surface`:** Kept for API compatibility. Because the heightmap stores unsigned uint16 elevations (range $0.0\text{m}$ to $655.35\text{m}$), ocean cells always evaluate to $0.0\text{m}$.
+* **Returns:** `true` on success; `false` if coordinates are out of bounds or `radius <= 0.0`.
+
+#### Air-Drop Parachute Crate Safety Check
+```pawn
+stock bool:IsDropZoneFlat(Float:dropX, Float:dropY, Float:searchRadius)
+{
+    new Float:avgZ, Float:maxZ, Float:minZ;
+
+    // Check a 30-meter radius around the target drop location
+    if (GetGroundZPosRadius(dropX, dropY, searchRadius, avgZ, maxZ, minZ))
+    {
+        // If elevation delta across the circle exceeds 6 meters, zone is too rugged
+        if ((maxZ - minZ) > 6.0)
+        {
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
 ```
 
 ---
@@ -223,9 +304,63 @@ stock PlaceRoadConeOnSlope(Float:x, Float:y, Float:heading)
     GetGroundObjectRotation(x, y, heading, rx, ry);
 
     // Create object flush with the sloped road
-    return CreateDynamicObject(1238, x, y, z, rx, ry, heading);
+    return CreateObject(1238, x, y, z, rx, ry, heading);
 }
 ```
+
+### Complete Object Pose Alignment (`GetGroundObjectPose`)
+
+Combines ground elevation querying and slope orientation in a single atomic call, optionally adding a vertical offset for the object pivot:
+
+```pawn
+native GetGroundObjectPose(Float:x, Float:y, Float:facing_angle, Float:z_offset, &Float:out_z, &Float:out_rx, &Float:out_ry, bool:interpolate = true);
+```
+
+* **`facing_angle`:** Object heading direction in degrees ($0.0^\circ$ to $360.0^\circ$).
+* **`z_offset`:** Vertical elevation offset to add above the ground surface (e.g. object model center-of-mass or pivot height).
+* **`&out_z`:** Output variable receiving final calculated elevation ($Z_{\text{ground}} + z_{\text{offset}}$).
+* **`&out_rx`, `&out_ry`:** Output variables receiving Pitch ($RX$) and Roll ($RY$) rotation angles in degrees.
+* **`interpolate`:** When `true` (default), applies continuous bilinear interpolation.
+* **Returns:** `1` on success, `0` out of bounds or if heightmap is not loaded.
+
+### 3D Alignment Between Two Ground Coordinates (`GetGroundTwoPointRotation`)
+While `GetGroundObjectRotation` aligns an object at a single point based on the local tangent plane, `GetGroundTwoPointRotation` bridges an object directly between **two distinct coordinates** $(x_1, y_1)$ and $(x_2, y_2)$ (e.g., spanning a modular bridge, wooden barricade, or construction ramp up a steep hill):
+
+```pawn
+native GetGroundTwoPointRotation(
+    Float:x1, Float:y1, Float:x2, Float:y2, Float:z_offset,
+    &Float:center_z, &Float:rx, &Float:ry, &Float:rz,
+    bool:interpolate = true
+);
+```
+
+* Computes the exact 3D midpoint elevation $\frac{z_1 + z_2}{2} + z_{\text{offset}}$.
+* Calculates the exact RenderWare Euler angles: Yaw ($RZ = \text{atan2}(dy, dx)$) and Pitch ($RY = -\text{pitch}$ along heading), leaving Roll ($RX = 0.0^\circ$).
+
+```pawn
+stock CreateRampBetweenPoints(Float:x1, Float:y1, Float:x2, Float:y2)
+{
+    new Float:cz, Float:rx, Float:ry, Float:rz;
+    if (GetGroundTwoPointRotation(x1, y1, x2, y2, 0.5, cz, rx, ry, rz))
+    {
+        return CreateObject(1459, (x1 + x2) * 0.5, (y1 + y2) * 0.5, cz, rx, ry, rz);
+    }
+    return INVALID_OBJECT_ID;
+}
+```
+
+### Contoured Line Segment Nodes (`GetGroundLinePoints`)
+Samples a sequence of contoured nodes along a line segment at fixed intervals, extracting both elevation and surface inclination angles:
+
+```pawn
+native GetGroundLinePoints(
+    Float:start_x, Float:start_y, Float:end_x, Float:end_y, Float:spacing, Float:z_offset,
+    Float:out_x[], Float:out_y[], Float:out_z[],
+    Float:out_rx[], Float:out_ry[], Float:out_rz[],
+    max_points = sizeof(out_x)
+);
+```
+Ideal for spawning roadside cone barriers, chain-link fences, guardrails, or lighting poles that naturally trace the undulations of the terrain.
 
 ---
 
@@ -240,9 +375,9 @@ native GetGroundClearance(Float:x, Float:y, Float:z, &Float:clearance, &bool:is_
 * **`is_underground`:** Populated with `true` if $z < z_{\text{ground}}$.
 
 ### `IsGroundUnderwater`
-Checks if the natural terrain floor at $(x, y)$ is submerged below the ocean line:
+Checks if water exists at $(x, y)$ and terrain elevation is below the water surface level:
 ```pawn
 native bool:IsGroundUnderwater(Float:x, Float:y, &Float:water_depth = 0.0);
 ```
-* Returns `true` if the terrain at $(x, y)$ is beneath sea level ($Z < 0.0\text{m}$).
-* Populates `water_depth` with the depth of the water column ($0.0 - z_{\text{terrain}}$).
+* Returns `true` if water is present above the terrain, `false` on dry land.
+* Populates `water_depth` with the water column depth ($Z_{\text{surface}} - Z_{\text{ground}}$). For inland lakes and pools, this reflects physical water depth against the basin floor; in the ocean (where the heightmap floor is $0.0\text{m}$), this reflects the active wave swell height ($0.15\text{m}$, $0.50\text{m}$, or $0.80\text{m}$).

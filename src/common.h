@@ -46,3 +46,14 @@ inline float CellToFloat(cell c)
     std::memcpy(&f, &c, sizeof(float));
     return f;
 }
+
+// Height of the ped root (GetPlayerPos Z) above the feet while standing on flat ground.
+constexpr float kPedRootHeight = 1.0f;
+
+#if defined(OMP_COMPONENT)
+#include <sdk.hpp>
+#include <player.hpp>
+#include <Server/Components/Vehicles/vehicles.hpp>
+extern IVehiclesComponent* g_vehiclesComponent;
+extern ICore* g_core;
+#endif

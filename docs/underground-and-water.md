@@ -7,7 +7,7 @@ This guide covers the **Underground Detection Engine** and the **Comprehensive W
 ## 1. Underground Detection Engine
 
 Standard scripts often perform naive underground checks using raw player or vehicle $Z$ coordinates ($Z_{\text{entity}} < Z_{\text{ground}}$). This causes widespread false positives because:
-1. **Pedestrian Center-of-Mass:** In GTA San Andreas, a player's $(X, Y, Z)$ pivot resides at hip height, approximately $0.90\text{m}$ above foot level.
+1. **Pedestrian Center-of-Mass:** In GTA San Andreas, a player's $(X, Y, Z)$ pivot resides at hip height, approximately $1.0\text{m}$ above foot level.
 2. **Vehicle Dimensional Variance:** Vehicle models vary dramatically in height-from low-profile karts ($0.7\text{m}$) to commercial trucks and aircraft ($4.5\text{m}$). Checking only the vehicle center pivot flags tall vehicles on slopes as "underground" while failing to detect low-riding vehicles clipped beneath roads.
 
 ```
@@ -24,8 +24,21 @@ Standard scripts often perform naive underground checks using raw player or vehi
 ### The 212 Vehicle Model Dimension Database
 GroundAndreas features an internal, precompiled database containing physical bounding dimensions for all **212 GTA San Andreas vehicle models** (IDs 400 through 611).
 
-* **Player Contact Point:** $Z_{\text{feet}} = Z_{\text{player}} - 0.90\text{m}$
-* **Vehicle Contact Point:** $Z_{\text{wheels}} = Z_{\text{vehicle}} - \frac{\text{model\_height}}{2}$
+* **Player Contact Point:** $Z_{\text{feet}} = Z_{\text{player}} - 1.0\text{m}$ (on foot).
+* **Vehicle Contact Point:** $Z_{\text{wheels}} = Z_{\text{vehicle}} - \text{offset}$
+* **In-Vehicle Player Resolution:** When the player is inside a vehicle, `IsPlayerOnGround`, `IsPlayerUnderGround` and `GetPlayerGroundDistance` evaluate the player's vehicle (same result as the vehicle natives).
+
+#### Vehicle Ground Offset Hierarchy
+Vehicle base ground offsets are resolved using a 3-tier hierarchy:
+1. **Exceptions measured in-game, only for models the wheel formula does not fit (currently: Kart 571 -> 0.28 m, due to its very small wheels).**
+2. **Physical Wheel Positions:** For all wheeled vehicles with collision data in open.mp SDK `vehicle_models.hpp`, the offset is dynamically calculated as $-Z_{\text{wheel\_lowest}} + 0.35\text{m}$ (where 0.35 m is an estimated average tire radius; validated in-game on the Elegy (exact); expected to stay within the 0.35 m on-ground tolerance for typical cars).
+3. **Models without wheel data in vehicle_models.hpp: helicopters and airplanes use the preset table; boats, trains, tram and the Vortex hovercraft use 0.90 m (not validated; boats are always reported off-ground while in water).**
+
+#### Calibrating Vehicle Offsets
+To calibrate or verify the base ground offset of any vehicle model:
+1. Load the demonstration filterscript (`FS_GroundAndreas_Demo`).
+2. Enter the target vehicle and park it on flat, level terrain (such as the LS Airport runway or Verdant Meadows airstrip).
+3. Check the real-time HUD telemetry: the `GetGroundClearance` reading displayed on the HUD corresponds directly to the physical ground offset of that vehicle model. Only report a model as an exception if its measured value differs from the formula by more than 0.15 m.
 
 ---
 
@@ -33,23 +46,47 @@ GroundAndreas features an internal, precompiled database containing physical bou
 
 #### Boolean Checks
 ```pawn
-native bool:IsPointUnderGround(Float:x, Float:y, Float:z);
-native bool:IsPlayerUnderGround(playerid);
-native bool:IsVehicleUnderGround(vehicleid);
+native bool:IsPointUnderGround(Float:x, Float:y, Float:z, Float:tolerance = 0.2);
+native bool:IsPlayerUnderGround(playerid, bool:ignore_interiors = true);
+native bool:IsVehicleUnderGround(vehicleid, bool:ignore_interiors = true);
 ```
-* **`IsPointUnderGround`:** Checks if an arbitrary 3D point is beneath the interpolated ground level ($Z < Z_{\text{ground}} - 0.05\text{m}$).
-* **`IsPlayerUnderGround`:** Checks if the player's feet are beneath the terrain ($Z_{\text{feet}} < Z_{\text{ground}} - 0.30\text{m}$).
-* **`IsVehicleUnderGround`:** Looks up the vehicle model ID, computes the lower wheel clearance, and checks if the wheels are beneath the terrain ($Z_{\text{wheels}} < Z_{\text{ground}} - 0.40\text{m}$).
+* **`IsPointUnderGround`:** Checks if an arbitrary 3D point is beneath the interpolated ground level ($Z < Z_{\text{ground}} - \text{tolerance}$).
+* **`IsPlayerUnderGround`:** Checks if the player's feet are beneath the terrain floor ($Z_{\text{feet}} = Z - 1.0\text{m}$). Returns `false` if the player is in an interior (> 0) or swimming/diving in water (since the heightmap has no negative seabed elevations). When the player is inside a vehicle, IsPlayerOnGround, IsPlayerUnderGround and GetPlayerGroundDistance evaluate the player's vehicle (same result as the vehicle natives).
+* **`IsVehicleUnderGround`:** Checks if the vehicle center pivot is more than 0.5m below the terrain ($Z < Z_{\text{ground}} - 0.5\text{m}$). Returns `false` if the vehicle is in an interior (> 0) or currently in water. Note: Virtual worlds (VW) used outdoors in roleplay servers do not trigger `ignore_interiors`.
 
 #### Direct Float Distance Queries
 ```pawn
 native Float:GetPointGroundDistance(Float:x, Float:y, Float:z);
-native Float:GetPlayerGroundDistance(playerid);
-native Float:GetVehicleGroundDistance(vehicleid);
+native Float:GetPlayerGroundDistance(playerid, bool:ignore_interiors = true);
+native Float:GetVehicleGroundDistance(vehicleid, bool:ignore_interiors = true);
 ```
 * Returns the vertical distance between the entity's ground contact point and the terrain.
 * **Positive value:** Entity is above ground (e.g. `+1.50` means 1.5 meters clearance).
 * **Negative value:** Entity is submerged beneath terrain (e.g. `-2.10` means 2.1 meters underground).
+* When `ignore_interiors = true` and the entity is in an interior (> 0), returns `0.0`.
+* When the player is inside a vehicle, IsPlayerOnGround, IsPlayerUnderGround and GetPlayerGroundDistance evaluate the player's vehicle (same result as the vehicle natives).
+* **Ocean Water Note:** Because the heightmap stores elevations as unsigned values clamped at sea level ($0.0\text{m}$), negative distance values returned while in the ocean represent depth beneath the sea surface rather than distance to a physical seabed.
+
+#### Solid Ground Contact Verification
+```pawn
+native bool:IsPlayerOnGround(playerid, Float:max_clearance = 0.35, bool:check_slope = true, bool:allow_water = false, bool:ignore_interiors = true);
+native bool:IsVehicleOnGround(vehicleid, Float:max_clearance = 0.35, bool:check_upsidedown = true, bool:allow_water = false, bool:ignore_interiors = true);
+```
+* **`IsPlayerOnGround`:** Checks if a player is physically standing on or in immediate contact with solid ground.
+  * **`max_clearance`:** Maximum vertical clearance between player feet and terrain ($0.35\text{m}$ default).
+  * **`check_slope`:** When `true` (default), rejects ground contact if the slope exceeds $60.0^\circ$ (steep cliffs).
+  * **`allow_water`:** When `false` (default), swimming or water surface contact does not count as solid ground.
+  * **`ignore_interiors`:** When `true` (default), returns `false` if the player is in an interior ($> 0$).
+  * When the player is inside a vehicle, IsPlayerOnGround, IsPlayerUnderGround and GetPlayerGroundDistance evaluate the player's vehicle (same result as the vehicle natives).
+* **`IsVehicleOnGround`:** Checks if a vehicle's wheels are resting on solid terrain, factoring in individual vehicle model base offsets.
+  * **`max_clearance`:** Maximum distance between tire contact level and ground ($0.35\text{m}$ default).
+  * **`check_upsidedown`:** When `true` (default), returns `false` if the vehicle is flipped or inverted.
+  * **`allow_water`:** When `false` (default), water contact does not qualify as ground contact.
+  * **`ignore_interiors`:** When `true` (default), returns `false` if the vehicle is in an interior ($> 0$).
+
+> [!IMPORTANT]
+> **2.5D Heightmap Limitations (Bridges, Tunnels & Overhangs)**
+> GroundAndreas utilizes a 2.5D grid that records the single highest solid collision node per $(X, Y)$ coordinate. Multi-level highways, under-bridge spans, covered garages, and tunnels (e.g. Los Santos & San Fierro train tunnels) will return the bridge deck or tunnel roof as ground elevation. For anti-cheat and void detection, always preserve `ignore_interiors = true` and verify world context before taking punitive action.
 
 ---
 
@@ -88,7 +125,7 @@ public OnPlayerUpdate(playerid)
 Detecting water in GTA San Andreas involves more than checking if $Z < 0.0$:
 * **Inland Elevation:** Lakes and reservoirs sit at high elevations (e.g., Sherman Dam reservoir sits at $Z \approx 40.0\text{m}$, Glen Park lake at $Z \approx 11.5\text{m}$).
 * **Underground Spaces:** Subway lines, basements, and highway tunnels run directly underneath water bodies. A global height test falsely marks players inside tunnels as swimming.
-* **Weather & Ocean Waves:** Storm weather generates dynamic ocean waves up to $1.5\text{m}$ high.
+* **Weather & Ocean Waves:** Storm weather generates dynamic ocean waves up to $0.80\text{m}$ high.
 * **Surface Contact vs. Submersion:** Swimming or wading on the surface must be distinguished from full underwater diving or drowned vehicles.
 
 ---
@@ -99,7 +136,7 @@ GroundAndreas strictly distinguishes between **contact** and **submersion**:
 
 | Category | Player Condition | Vehicle Condition |
 | :--- | :--- | :--- |
-| **`InWater`** (Surface Contact) | Player's feet touch water surface ($Z_{\text{feet}} \le Z_{\text{water}}$). | Vehicle wheels touch water surface ($Z_{\text{wheels}} \le Z_{\text{water}}$). |
+| **`InWater`** (Surface Contact) | Player body makes contact with water ($Z_{\text{player}} \le Z_{\text{water}} + 0.35\text{m}$; waist depth $\approx 0.65\text{m}$) and above water floor. | Vehicle wheels touch water surface ($Z_{\text{wheels}} \le Z_{\text{water}}$). |
 | **`UnderWater`** (Full Submersion) | Player's head is completely submerged ($Z + 0.90\text{m} \le Z_{\text{water}}$). | Vehicle roof is completely submerged ($Z + \frac{\text{height}}{2} \le Z_{\text{water}}$). |
 
 ---
@@ -116,30 +153,33 @@ native bool:IsPlayerUnderWater(playerid, weatherid = -1);
 native bool:IsVehicleInWater(vehicleid, weatherid = -1);
 native bool:IsVehicleUnderWater(vehicleid, weatherid = -1);
 
-native GetWaterLevel(Float:x, Float:y, &Float:water_z, weatherid = -1);
+native bool:GetWaterLevel(Float:x, Float:y, &Float:water_z, weatherid = -1);
 ```
 
-* **`weatherid`:** Pass the current server weather ID, or `-1` for calm sea default.
+* **`weatherid`:** Pass a specific weather ID ($0 - 45$), or `-1` to automatically query the current server weather (via `GetWeather` on open.mp; on SA-MP 0.3.7, which lacks a weather query native, it gracefully falls back to the calm sea level of $+0.15\text{m}$).
 * **`GetWaterLevel`:** Returns `1` if water exists at $(x, y)$ and outputs the surface elevation `&water_z`. Returns `0` if dry land.
 
 ---
 
 ### Dynamic Ocean Wave Swell
 
-Global ocean bathymetry automatically computes wave swell based on GTA San Andreas weather patterns:
+Global ocean surface levels automatically compute wave swell based on GTA San Andreas weather patterns:
 
 | Weather IDs | Environmental Condition | Water Surface Level ($Z$) |
 | :---: | :--- | :---: |
-| `-1` | Calm Sea Default (No weather modifier) | $0.0\text{m}$ |
-| `0, 1, 2, 3, 5, 6, 9, 10, 11, 13, 17, 18, 20+` | Standard / Mild Weather | $+0.5\text{m}$ |
-| `4, 7, 8, 12, 14, 15, 16` | Stormy / Foggy / Rain / Overcast | $+1.0\text{m}$ |
-| `19` | Sandstorm / High Surge Waves | $+1.5\text{m}$ |
+| `-1` | Server weather (GetWeather on open.mp; calm sea on SA-MP 0.3.7) | Depends on weather (+0.15m on SA-MP) |
+| `0 - 3, 5 - 6, 9 - 11, 13, 17 - 18, ...` | Calm sea default / clear skies | $+0.15\text{m}$ |
+| `4, 7, 8, 12, 14, 15, 16` | Rain / storm / fog / overcast | $+0.50\text{m}$ |
+| `19` | Weather 19 (sandstorm) | $+0.80\text{m}$ |
+
+> [!NOTE]
+> In ocean and coastal zones, any low ground cell with raw elevation $\le \text{wave amplitude}$ (up to $+0.80\text{m}$) is treated as submerged under active swells. Very low docks, piers, or beaches at sea level may evaluate as water during extreme weather.
 
 ---
 
-### Built-in 16 Inland Water Bodies Catalog
+### Built-in 44 Inland Water Bodies Catalog
 
-GroundAndreas contains pre-indexed 3D bounding volumes with specific **Surface $Z$** and **Floor $Z$** thresholds for all major inland water bodies. If an entity is within the $(X, Y)$ perimeter but below the Floor $Z$ (e.g. in a tunnel under the reservoir), it is correctly identified as **dry**:
+GroundAndreas contains pre-indexed 3D bounding volumes with specific **Surface $Z$** and **Max Depth** thresholds for all 44 official inland water bodies from GTA San Andreas. If an entity is within the $(X, Y)$ perimeter but below the maximum depth floor (e.g. in a tunnel under the reservoir or beneath an elevated indoor pool), it is correctly identified as **dry**:
 
 1. **Sherman Dam Reservoir (Tierra Robada):** High-altitude basin ($Z_{\text{surface}} = 40.0\text{m}$).
 2. **Glen Park Lake (Los Santos):** Urban recreation lake ($Z_{\text{surface}} = 11.5\text{m}$).

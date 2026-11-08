@@ -23,11 +23,26 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Configure CMake
+      - name: Verify Version Consistency
+        shell: pwsh
+        run: |
+          $incVer = (Select-String -Path GroundAndreas.inc -Pattern '#define\s+GROUNDANDREAS_VERSION_STRING\s+"([^"]+)"').Matches[0].Groups[1].Value
+          $cmakeVer = (Select-String -Path CMakeLists.txt -Pattern 'project\(GroundAndreas\s+VERSION\s+([^\s\)]+)').Matches[0].Groups[1].Value
+          $pawnVer = (Get-Content pawn.json | ConvertFrom-Json).version
+          if ($incVer -ne $cmakeVer -or $incVer -ne $pawnVer) { throw "Version mismatch: GroundAndreas.inc ($incVer), CMakeLists.txt ($cmakeVer), pawn.json ($pawnVer)" }
+          Write-Host "Version consistent across all files: $incVer"
+
+      - name: Configure CMake (Win32)
         run: cmake -B build -A Win32 -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build
+      - name: Build (Win32)
         run: cmake --build build --config Release
+
+      - name: Verify Demo AMX Portability
+        shell: pwsh
+        run: |
+          $b = [IO.File]::ReadAllText("FS_GroundAndreas_Demo.amx", [Text.Encoding]::ASCII)
+          if ($b -match 'PC_Init|GetWeather|__OPEN_MP_VERSION') { throw "Demo AMX must be compiled with a_samp only (no open.mp / Pawn.CMD)" }
 
       - name: Prepare Package
         shell: pwsh
@@ -36,23 +51,29 @@ jobs:
           New-Item -ItemType Directory -Force -Path package/components | Out-Null
           New-Item -ItemType Directory -Force -Path package/include | Out-Null
           New-Item -ItemType Directory -Force -Path package/scriptfiles | Out-Null
+          New-Item -ItemType Directory -Force -Path package/filterscripts | Out-Null
 
           # Copy Plugin
           $pluginDll = Get-ChildItem -Path "build" -Filter "GroundAndreas.dll" -Recurse | Where-Object { $_.FullName -notmatch "components" } | Select-Object -First 1
-          if ($pluginDll) {
-            Copy-Item $pluginDll.FullName "package/plugins/GroundAndreas.dll" -Force
-          }
+          if (-not $pluginDll) { throw "Plugin DLL not found" }
+          Copy-Item $pluginDll.FullName "package/plugins/GroundAndreas.dll" -Force
 
           # Copy Component
           $compDll = Get-ChildItem -Path "build" -Filter "GroundAndreas.dll" -Recurse | Where-Object { $_.FullName -match "components" } | Select-Object -First 1
-          if ($compDll) {
-            Copy-Item $compDll.FullName "package/components/GroundAndreas.dll" -Force
-          }
+          if (-not $compDll) { throw "Component DLL not found" }
+          Copy-Item $compDll.FullName "package/components/GroundAndreas.dll" -Force
 
           # Copy Includes, Data, Examples and License (standalone - no README.md)
           if (Test-Path "GroundAndreas.inc") { Copy-Item "GroundAndreas.inc" "package/include/GroundAndreas.inc" -Force }
           if (Test-Path "scriptfiles/SAfull.hmap") { Copy-Item "scriptfiles/SAfull.hmap" "package/scriptfiles/SAfull.hmap" -Force }
-          if (Test-Path "Example.pwn") { Copy-Item "Example.pwn" "package/Example.pwn" -Force }
+          if (Test-Path "FS_GroundAndreas_Demo.pwn") {
+              Copy-Item "FS_GroundAndreas_Demo.pwn" "package/FS_GroundAndreas_Demo.pwn" -Force
+              Copy-Item "FS_GroundAndreas_Demo.pwn" "package/filterscripts/FS_GroundAndreas_Demo.pwn" -Force
+          }
+          if (Test-Path "FS_GroundAndreas_Demo.amx") {
+              Copy-Item "FS_GroundAndreas_Demo.amx" "package/FS_GroundAndreas_Demo.amx" -Force
+              Copy-Item "FS_GroundAndreas_Demo.amx" "package/filterscripts/FS_GroundAndreas_Demo.amx" -Force
+          }
           if (Test-Path "LICENSE") { Copy-Item "LICENSE" "package/LICENSE" -Force }
 
       - name: Compress Package
@@ -68,18 +89,46 @@ jobs:
           path: dist/GroundAndreas-Windows.zip
 
   build-linux-release:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
+    container: debian:bullseye
     steps:
+      - name: Install Dependencies
+        run: |
+          rm -f /etc/apt/sources.list.d/*
+          printf '%s\n' \
+            "deb http://archive.debian.org/debian bullseye main" \
+            "deb http://archive.debian.org/debian bullseye-updates main" \
+            "deb http://archive.debian.org/debian-security bullseye-security main" \
+            "deb http://archive.debian.org/debian bullseye-backports main" \
+            > /etc/apt/sources.list
+          apt-get -o Acquire::Check-Valid-Until=false update
+          apt-get install -y git ca-certificates gcc g++ gcc-multilib g++-multilib zip binutils
+          apt-get install -y -t bullseye-backports cmake
+          cmake --version
+
       - uses: actions/checkout@v7
         with:
           clean: true
           submodules: recursive
           fetch-depth: 0
 
-      - name: Install 32-bit Multilib
+      - name: Mark workspace safe
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Verify Include Symbol Length (<= 31 chars)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib zip
+          grep -oE '^\s*(native|stock|public|forward)\s+([A-Za-z]+:)?[A-Za-z_0-9]+' GroundAndreas.inc | awk '{n=$NF; sub(/^[A-Za-z]+:/,"",n); if (length(n)>31) {print "Symbol exceeds 31 chars:", n; bad=1}} END{exit bad}'
+
+      - name: Verify Version Consistency
+        run: |
+          INC_VER=$(grep -E '#define[[:space:]]+GROUNDANDREAS_VERSION_STRING[[:space:]]+"[^"]+"' GroundAndreas.inc | sed -E 's/.*"([^"]+)".*/\1/')
+          CMAKE_VER=$(grep -E 'project\(GroundAndreas[[:space:]]+VERSION' CMakeLists.txt | sed -E 's/.*VERSION[[:space:]]+([^[:space:])]+).*/\1/')
+          PAWN_VER=$(grep -E '"version"[[:space:]]*:[[:space:]]*"[^"]+"' pawn.json | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          if [ "$INC_VER" != "$CMAKE_VER" ] || [ "$INC_VER" != "$PAWN_VER" ]; then
+            echo "Version mismatch: GroundAndreas.inc ($INC_VER), CMakeLists.txt ($CMAKE_VER), pawn.json ($PAWN_VER)"
+            exit 1
+          fi
+          echo "Version consistent across all files: $INC_VER"
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-m32" -DCMAKE_CXX_FLAGS="-m32" -DCMAKE_SHARED_LINKER_FLAGS="-m32" -DCMAKE_MODULE_LINKER_FLAGS="-m32"
@@ -87,26 +136,59 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Verify Linux Runtime Dependencies
+        run: |
+          MAX_ALLOWED_GLIBC="2.31"
+          for SO in $(find build -name "GroundAndreas.so"); do
+            echo "=== Checking $SO ==="
+            MAX_GLIBC=$(objdump -T "$SO" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)
+            echo "Max GLIBC in $SO: $MAX_GLIBC (allowed <= $MAX_ALLOWED_GLIBC)"
+            if [ -n "$MAX_GLIBC" ]; then
+              HIGHEST=$(printf "%s\n%s" "$MAX_GLIBC" "$MAX_ALLOWED_GLIBC" | sort -V | tail -1)
+              if [ "$HIGHEST" != "$MAX_ALLOWED_GLIBC" ]; then
+                echo "ERROR: $SO requires GLIBC_$MAX_GLIBC which is newer than $MAX_ALLOWED_GLIBC!"
+                exit 1
+              fi
+            fi
+            if ldd "$SO" | grep -i "libstdc++"; then
+              echo "ERROR: libstdc++ is dynamically linked in $SO!"
+              exit 1
+            fi
+          done
+          echo "All Linux binaries verified successfully (static libstdc++, GLIBC <= $MAX_ALLOWED_GLIBC)."
+
+      - name: Verify Demo AMX Portability
+        run: |
+          if grep -aqE 'PC_Init|GetWeather|__OPEN_MP_VERSION' FS_GroundAndreas_Demo.amx; then
+            echo "Demo AMX must be compiled with a_samp only (no open.mp / Pawn.CMD)"
+            exit 1
+          fi
+
       - name: Prepare Package
         run: |
-          mkdir -p package/plugins package/components package/include package/scriptfiles
+          mkdir -p package/plugins package/components package/include package/scriptfiles package/filterscripts
 
           # Copy Plugin
           PLUGIN_SO=$(find build -name "GroundAndreas.so" | grep -v "components" | head -n 1)
-          if [ -n "$PLUGIN_SO" ]; then
-            cp "$PLUGIN_SO" "package/plugins/GroundAndreas.so"
-          fi
+          [ -n "$PLUGIN_SO" ] || { echo "Plugin .so not found"; exit 1; }
+          cp "$PLUGIN_SO" "package/plugins/GroundAndreas.so"
 
           # Copy Component
           COMP_SO=$(find build -name "GroundAndreas.so" | grep "components" | head -n 1)
-          if [ -n "$COMP_SO" ]; then
-            cp "$COMP_SO" "package/components/GroundAndreas.so"
-          fi
+          [ -n "$COMP_SO" ] || { echo "Component .so not found"; exit 1; }
+          cp "$COMP_SO" "package/components/GroundAndreas.so"
 
           # Copy Includes, Data, Examples and License (standalone - no README.md)
           [ -f "GroundAndreas.inc" ] && cp "GroundAndreas.inc" "package/include/GroundAndreas.inc"
           [ -f "scriptfiles/SAfull.hmap" ] && cp "scriptfiles/SAfull.hmap" "package/scriptfiles/SAfull.hmap"
-          [ -f "Example.pwn" ] && cp "Example.pwn" "package/Example.pwn"
+          if [ -f "FS_GroundAndreas_Demo.pwn" ]; then
+            cp "FS_GroundAndreas_Demo.pwn" "package/FS_GroundAndreas_Demo.pwn"
+            cp "FS_GroundAndreas_Demo.pwn" "package/filterscripts/FS_GroundAndreas_Demo.pwn"
+          fi
+          if [ -f "FS_GroundAndreas_Demo.amx" ]; then
+            cp "FS_GroundAndreas_Demo.amx" "package/FS_GroundAndreas_Demo.amx"
+            cp "FS_GroundAndreas_Demo.amx" "package/filterscripts/FS_GroundAndreas_Demo.amx"
+          fi
           [ -f "LICENSE" ] && cp "LICENSE" "package/LICENSE"
 
       - name: Compress Package
